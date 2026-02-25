@@ -249,8 +249,12 @@ func buildProgressFn(opts *DownloadOptions, artifactName string) func(downloaded
 	return func(downloaded, total int64) {
 		var label string
 		if total > 0 {
-			pct := int(100 * downloaded / total)
-			label = fmt.Sprintf("Downloading %s: %d%%", artifactName, pct)
+			// 0.1% precision using integer math (0..1000)
+			pct10 := (downloaded * 1000) / total
+			if pct10 > 1000 {
+				pct10 = 1000
+			}
+			label = fmt.Sprintf("Downloading %s: %.1f%%", artifactName, float64(pct10)/10.0)
 		} else {
 			label = fmt.Sprintf("Downloading %s: %s", artifactName, formatBytes(downloaded))
 		}
