@@ -1,8 +1,8 @@
 name: Unit and Integration Tests
 on:
-  push:
-    branches:
-      - trunk
+  # push:
+  #   branches:
+  #     - trunk
   pull_request:
 
 permissions:
