@@ -12,7 +12,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest]
+        # os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -32,7 +33,7 @@ jobs:
           mkdir -p dist
           # Build the gh CLI. Adjust the package path if your repo layout differs.
           go build -trimpath -ldflags "-s -w" -o dist/gh ./cmd/gh
-          ./dist/gh version || true
+          ./dist/gh version
 
       - name: Upload gh binary
         uses: actions/upload-artifact@v4
