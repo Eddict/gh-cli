@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"time"
 
 	"github.com/MakeNowJust/heredoc"
 	"github.com/cli/cli/v2/internal/safepaths"
@@ -239,26 +240,76 @@ func matchAnyPattern(patterns []string, name string) bool {
 	return false
 }
 
-// buildProgressFn returns a progress callback that updates the spinner label
-// with the artifact name and download progress. When the spinner is not active
-// (e.g., non-TTY or spinner disabled), the callback is a no-op.
+// buildProgressFn returns a progress callback that updates the spinner label with the artifact
+// name, download progress, and download speed.
+// - Progress percentage is updated responsively (0.1% increments when the total size is known).
+// - Download speeds are computed less frequently and smoothed for stability.
+// When the spinner is not active (e.g., non-TTY or spinner disabled), the callback is a no-op.
 func buildProgressFn(opts *DownloadOptions, artifactName string) func(downloaded, total int64) {
 	if opts.IO.GetSpinnerDisabled() {
 		return nil
 	}
+
+	start := time.Now()
+
+	var (
+		lastReport    time.Time
+		lastN         int64
+		smoothedCurBps float64
+	)
+
+	const (
+		speedInterval = 500 * time.Millisecond
+		alpha         = 0.25 // EMA smoothing factor; higher = more responsive, lower = smoother
+	)
+
 	return func(downloaded, total int64) {
-		var label string
-		if total > 0 {
-			// 0.1% precision using integer math (0..1000)
-			pct10 := (downloaded * 1000) / total
-			if pct10 > 1000 {
-				pct10 = 1000
+		now := time.Now()
+
+		// Update speed estimates at a slower cadence for stability, but always on completion.
+		done := total > 0 && downloaded >= total
+		if lastReport.IsZero() || now.Sub(lastReport) >= speedInterval || done {
+			// Average B/s
+			elapsed := now.Sub(start).Seconds()
+			avgBps := 0.0
+			if elapsed > 0 {
+				avgBps = float64(downloaded) / elapsed
 			}
-			label = fmt.Sprintf("Downloading %s: %.1f%%", artifactName, float64(pct10)/10.0)
-		} else {
-			label = fmt.Sprintf("Downloading %s: %s", artifactName, formatBytes(downloaded))
+
+			// Current (windowed) B/s, smoothed via EMA
+			dt := now.Sub(lastReport).Seconds()
+			if lastReport.IsZero() {
+				dt = 0
+			}
+			if dt > 0 {
+				sample := float64(downloaded-lastN) / dt
+				if smoothedCurBps == 0 {
+					smoothedCurBps = sample
+				} else {
+					smoothedCurBps = alpha*sample + (1-alpha)*smoothedCurBps
+				}
+			}
+
+			lastReport = now
+			lastN = downloaded
+
+			// Build label
+			var label string
+			curStr := fmt.Sprintf("%s/s", formatBytes(int64(smoothedCurBps)))
+			avgStr := fmt.Sprintf("%s/s", formatBytes(int64(avgBps)))
+
+			if total > 0 {
+				pct10 := (downloaded * 1000) / total
+				if pct10 > 1000 {
+					pct10 = 1000
+				}
+				label = fmt.Sprintf("Downloading %s: %.1f%% (%s cur, %s avg)", artifactName, float64(pct10)/10.0, curStr, avgStr)
+			} else {
+				label = fmt.Sprintf("Downloading %s: %s (%s cur, %s avg)", artifactName, formatBytes(downloaded), curStr, avgStr)
+			}
+
+			opts.IO.StartProgressIndicatorWithLabel(label)
 		}
-		opts.IO.StartProgressIndicatorWithLabel(label)
 	}
 }
 
