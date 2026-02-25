@@ -35,10 +35,25 @@ jobs:
           go build -trimpath -ldflags "-s -w" -o dist/gh ./cmd/gh
           ./dist/gh version
 
-      - name: Upload gh binary
+      - name: Compute short SHA
+        id: vars
+        shell: bash
+        run: echo "short_sha=${GITHUB_SHA:0:12}" >> "$GITHUB_OUTPUT"
+
+      # Alias artifact name (easy to download without knowing SHA)
+      - name: Upload gh binary (alias)
         uses: actions/upload-artifact@v4
         with:
           name: gh-${{ matrix.os }}
+          if-no-files-found: error
+          path: dist/gh
+          retention-days: 7
+
+      # Versioned artifact name (unique, traceable)
+      - name: Upload gh binary (versioned)
+        uses: actions/upload-artifact@v4
+        with:
+          name: gh-${{ matrix.os }}-${{ steps.vars.outputs.short_sha }}
           if-no-files-found: error
           path: dist/gh
           retention-days: 7
