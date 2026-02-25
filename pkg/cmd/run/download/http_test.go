@@ -72,7 +72,7 @@ func Test_Download(t *testing.T) {
 	api := &apiPlatform{
 		client: &http.Client{Transport: reg},
 	}
-	require.NoError(t, api.Download("https://api.github.com/repos/OWNER/REPO/actions/artifacts/12345/zip", destDir))
+	require.NoError(t, api.Download("https://api.github.com/repos/OWNER/REPO/actions/artifacts/12345/zip", destDir, nil))
 
 	var paths []string
 	parentPrefix := tmpDir + string(filepath.Separator)
@@ -104,4 +104,76 @@ func Test_Download(t *testing.T) {
 		filepath.Join("artifact", "src", "main.go"),
 		filepath.Join("artifact", "src", "util.go"),
 	}, paths)
+}
+
+func Test_progressReader(t *testing.T) {
+	t.Run("invokes callback with downloaded and total bytes", func(t *testing.T) {
+		data := []byte("hello world")
+		var calls []struct{ downloaded, total int64 }
+
+		pr := &progressReader{
+			r:     strings.NewReader(string(data)),
+			total: int64(len(data)),
+			progress: func(downloaded, total int64) {
+				calls = append(calls, struct{ downloaded, total int64 }{downloaded, total})
+			},
+		}
+
+		buf := make([]byte, len(data))
+		_, err := pr.Read(buf)
+		require.NoError(t, err)
+
+		require.NotEmpty(t, calls)
+		assert.Equal(t, int64(len(data)), calls[len(calls)-1].downloaded)
+		assert.Equal(t, int64(len(data)), calls[len(calls)-1].total)
+	})
+
+	t.Run("total is zero when content length unknown", func(t *testing.T) {
+		data := []byte("hello")
+		var lastTotal int64 = -1
+
+		pr := &progressReader{
+			r:     strings.NewReader(string(data)),
+			total: 0,
+			progress: func(downloaded, total int64) {
+				lastTotal = total
+			},
+		}
+
+		buf := make([]byte, len(data))
+		_, err := pr.Read(buf)
+		require.NoError(t, err)
+
+		assert.Equal(t, int64(0), lastTotal)
+	})
+
+	t.Run("nil callback does not panic", func(t *testing.T) {
+		pr := &progressReader{
+			r:        strings.NewReader("data"),
+			progress: nil,
+		}
+		buf := make([]byte, 4)
+		_, err := pr.Read(buf)
+		require.NoError(t, err)
+	})
+}
+
+func Test_formatBytes(t *testing.T) {
+	tests := []struct {
+		n    int64
+		want string
+	}{
+		{0, "0 B"},
+		{512, "512 B"},
+		{1023, "1023 B"},
+		{1024, "1.0 KB"},
+		{1536, "1.5 KB"},
+		{1024 * 1024, "1.0 MB"},
+		{int64(1.5 * 1024 * 1024), "1.5 MB"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			assert.Equal(t, tt.want, formatBytes(tt.n))
+		})
+	}
 }

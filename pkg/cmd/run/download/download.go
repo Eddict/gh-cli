@@ -28,7 +28,7 @@ type DownloadOptions struct {
 
 type platform interface {
 	List(runID string) ([]shared.Artifact, error)
-	Download(url string, dir safepaths.Absolute) error
+	Download(url string, dir safepaths.Absolute, progress func(downloaded, total int64)) error
 }
 
 type iprompter interface {
@@ -187,7 +187,8 @@ func runDownload(opts *DownloadOptions) error {
 			}
 		}
 
-		err := opts.Platform.Download(a.DownloadURL, destDir)
+		progressFn := buildProgressFn(opts, a.Name)
+		err = opts.Platform.Download(a.DownloadURL, destDir, progressFn)
 		if err != nil {
 			return fmt.Errorf("error downloading %s: %w", a.Name, err)
 		}
@@ -236,4 +237,35 @@ func matchAnyPattern(patterns []string, name string) bool {
 		}
 	}
 	return false
+}
+
+// buildProgressFn returns a progress callback that updates the spinner label
+// with the artifact name and download progress. When the spinner is not active
+// (e.g., non-TTY or spinner disabled), the callback is a no-op.
+func buildProgressFn(opts *DownloadOptions, artifactName string) func(downloaded, total int64) {
+	if opts.IO.GetSpinnerDisabled() {
+		return nil
+	}
+	return func(downloaded, total int64) {
+		var label string
+		if total > 0 {
+			pct := int(100 * downloaded / total)
+			label = fmt.Sprintf("Downloading %s: %d%%", artifactName, pct)
+		} else {
+			label = fmt.Sprintf("Downloading %s: %s", artifactName, formatBytes(downloaded))
+		}
+		opts.IO.StartProgressIndicatorWithLabel(label)
+	}
+}
+
+// formatBytes formats a byte count as a human-readable string.
+func formatBytes(n int64) string {
+	switch {
+	case n < 1024:
+		return fmt.Sprintf("%d B", n)
+	case n < 1024*1024:
+		return fmt.Sprintf("%.1f KB", float64(n)/1024)
+	default:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1024*1024))
+	}
 }
