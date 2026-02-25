@@ -1,0 +1,48 @@
+name: Install from source (make install)
+
+on:
+  workflow_dispatch:
+    inputs:
+      prefix:
+        description: "Install prefix for `make install` (Unix only)"
+        required: false
+        default: "${{ github.workspace }}/_install"
+
+permissions:
+  contents: read
+
+jobs:
+  unix-install:
+    name: Unix (Linux/macOS) make install + upload gh
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: "go.mod"
+
+      - name: Install from source
+        shell: bash
+        run: |
+          set -euo pipefail
+          prefix="${{ inputs.prefix }}"
+          mkdir -p "$prefix"
+          make install prefix="$prefix"
+          echo "Installed to: $prefix"
+          "$prefix/bin/gh" version
+
+      - name: Upload installed gh binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: gh-${{ matrix.os }}
+          if-no-files-found: error
+          path: ${{ inputs.prefix }}/bin/gh
+          retention-days: 7
