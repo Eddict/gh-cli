@@ -253,8 +253,8 @@ func buildProgressFn(opts *DownloadOptions, artifactName string) func(downloaded
 	start := time.Now()
 
 	var (
-		lastReport    time.Time
-		lastN         int64
+		lastReport     time.Time
+		lastN          int64
 		smoothedCurBps float64
 	)
 
