@@ -1,11 +1,17 @@
 package download
 
 import (
+	"bytes"
+	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/cli/cli/v2/internal/ghrepo"
@@ -65,6 +71,11 @@ func Test_Download(t *testing.T) {
 	reg := &httpmock.Registry{}
 	defer reg.Verify(t)
 
+	// First GET is the range-support probe; the mock returns 200 so multipart is skipped.
+	reg.Register(
+		httpmock.REST("GET", "repos/OWNER/REPO/actions/artifacts/12345/zip"),
+		httpmock.FileResponse("./fixtures/myproject.zip"))
+	// Second GET is the actual single-stream download.
 	reg.Register(
 		httpmock.REST("GET", "repos/OWNER/REPO/actions/artifacts/12345/zip"),
 		httpmock.FileResponse("./fixtures/myproject.zip"))
@@ -176,4 +187,180 @@ func Test_formatBytes(t *testing.T) {
 			assert.Equal(t, tt.want, formatBytes(tt.n))
 		})
 	}
+}
+
+func Test_probeRangeSupport(t *testing.T) {
+	t.Run("returns total size when server responds 206 with Content-Range", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Range") == "bytes=0-0" {
+				w.Header().Set("Content-Range", "bytes 0-0/12345")
+				w.Header().Set("Accept-Ranges", "bytes")
+				w.WriteHeader(http.StatusPartialContent)
+				_, _ = w.Write([]byte("x"))
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer srv.Close()
+
+		total, err := probeRangeSupport(srv.Client(), srv.URL+"/artifact.zip")
+		require.NoError(t, err)
+		assert.Equal(t, int64(12345), total)
+	})
+
+	t.Run("returns 0 when server responds 200 (no range support)", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("full body"))
+		}))
+		defer srv.Close()
+
+		total, err := probeRangeSupport(srv.Client(), srv.URL+"/artifact.zip")
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), total)
+	})
+
+	t.Run("returns 0 when server responds 206 without Content-Range header", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusPartialContent)
+		}))
+		defer srv.Close()
+
+		total, err := probeRangeSupport(srv.Client(), srv.URL+"/artifact.zip")
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), total)
+	})
+}
+
+// rangeServer returns an httptest.Server that serves body as a byte-range aware endpoint.
+// Each request is checked for a Range header; if present the appropriate 206 slice is served.
+func rangeServer(body []byte) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rangeHdr := r.Header.Get("Range")
+		if rangeHdr == "" {
+			w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(body)
+			return
+		}
+		var start, end int64
+		if _, err := fmt.Sscanf(rangeHdr, "bytes=%d-%d", &start, &end); err != nil {
+			http.Error(w, "bad range", http.StatusBadRequest)
+			return
+		}
+		if end >= int64(len(body)) {
+			end = int64(len(body)) - 1
+		}
+		chunk := body[start : end+1]
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, len(body)))
+		w.Header().Set("Content-Length", strconv.Itoa(len(chunk)))
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write(chunk)
+	}))
+}
+
+func Test_downloadChunkOnce(t *testing.T) {
+	data := bytes.Repeat([]byte("abcdefgh"), 128) // 1 KB
+	srv := rangeServer(data)
+	defer srv.Close()
+
+	tmpfile, err := os.CreateTemp("", "gh-chunk-test-*.bin")
+	require.NoError(t, err)
+	defer func() {
+		_ = tmpfile.Close()
+		_ = os.Remove(tmpfile.Name())
+	}()
+	require.NoError(t, tmpfile.Truncate(int64(len(data))))
+
+	var downloaded atomic.Int64
+	require.NoError(t, downloadChunkOnce(srv.Client(), srv.URL+"/artifact.zip", 0, int64(len(data)-1), tmpfile, &downloaded))
+
+	assert.Equal(t, int64(len(data)), downloaded.Load())
+
+	_, err = tmpfile.Seek(0, io.SeekStart)
+	require.NoError(t, err)
+	got, err := io.ReadAll(tmpfile)
+	require.NoError(t, err)
+	assert.Equal(t, data, got)
+}
+
+func Test_downloadArtifactMultipart(t *testing.T) {
+	// Build a real zip archive in memory so zip.NewReader can open it.
+	zipBytes := readFixtureZip(t, "./fixtures/myproject.zip")
+	total := int64(len(zipBytes))
+
+	srv := rangeServer(zipBytes)
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	destDir, err := safepaths.ParseAbsolute(filepath.Join(tmpDir, "out"))
+	require.NoError(t, err)
+
+	var progressCalls int
+	progressFn := func(downloaded, size int64) { progressCalls++ }
+
+	err = downloadArtifactMultipart(srv.Client(), srv.URL+"/artifact.zip", total, 4, destDir, progressFn)
+	require.NoError(t, err)
+
+	// Verify that at least the known top-level entries exist.
+	entries, err := os.ReadDir(destDir.String())
+	require.NoError(t, err)
+	require.NotEmpty(t, entries)
+
+	// Progress should have been called at least once (final report on defer).
+	assert.GreaterOrEqual(t, progressCalls, 1)
+}
+
+func Test_downloadArtifact_multipartFallback(t *testing.T) {
+	// Server that always returns 200 (no range support) → downloadArtifact must fall back
+	// to the single-stream path and still produce the extracted artifact.
+	zipBytes := readFixtureZip(t, "./fixtures/myproject.zip")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", strconv.Itoa(len(zipBytes)))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(zipBytes)
+	}))
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	destDir, err := safepaths.ParseAbsolute(filepath.Join(tmpDir, "out"))
+	require.NoError(t, err)
+
+	err = downloadArtifact(srv.Client(), srv.URL+"/artifact.zip", destDir, nil)
+	require.NoError(t, err)
+
+	entries, err := os.ReadDir(destDir.String())
+	require.NoError(t, err)
+	require.NotEmpty(t, entries)
+}
+
+func Test_multipartConcurrency(t *testing.T) {
+	t.Run("returns default when env var is unset", func(t *testing.T) {
+		t.Setenv("GH_MULTIPART_DOWNLOAD_CONCURRENCY", "")
+		assert.Equal(t, defaultMultipartConcurrency, multipartConcurrency())
+	})
+
+	t.Run("returns value from env var", func(t *testing.T) {
+		t.Setenv("GH_MULTIPART_DOWNLOAD_CONCURRENCY", "8")
+		assert.Equal(t, 8, multipartConcurrency())
+	})
+
+	t.Run("ignores invalid env var and returns default", func(t *testing.T) {
+		t.Setenv("GH_MULTIPART_DOWNLOAD_CONCURRENCY", "not-a-number")
+		assert.Equal(t, defaultMultipartConcurrency, multipartConcurrency())
+	})
+
+	t.Run("ignores zero env var and returns default", func(t *testing.T) {
+		t.Setenv("GH_MULTIPART_DOWNLOAD_CONCURRENCY", "0")
+		assert.Equal(t, defaultMultipartConcurrency, multipartConcurrency())
+	})
+}
+
+// readFixtureZip reads the raw bytes of a fixture zip file for use as a test body.
+func readFixtureZip(t *testing.T, path string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	require.NoError(t, err)
+	return b
 }

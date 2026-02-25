@@ -6,6 +6,9 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cli/cli/v2/api"
@@ -51,7 +54,219 @@ func (pr *progressReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-func downloadArtifact(httpClient *http.Client, url string, destDir safepaths.Absolute, progress func(downloaded, total int64)) error {
+const (
+	// defaultMultipartConcurrency is the number of concurrent chunk downloads used when the
+	// server supports HTTP byte-range requests and the artifact exceeds multipartMinSize.
+	defaultMultipartConcurrency = 4
+
+	// multipartMinSize is the minimum artifact size (10 MB) required to engage the multipart
+	// download path. Smaller artifacts are fetched with a single stream to avoid overhead.
+	multipartMinSize = 10 * 1024 * 1024
+
+	// multipartMaxRetry is the maximum number of additional attempts per chunk on transient error.
+	multipartMaxRetry = 3
+)
+
+// multipartConcurrency returns the number of concurrent chunk downloads to use.
+// It reads GH_MULTIPART_DOWNLOAD_CONCURRENCY from the environment and falls back
+// to defaultMultipartConcurrency when the variable is absent or invalid.
+func multipartConcurrency() int {
+	if s := os.Getenv("GH_MULTIPART_DOWNLOAD_CONCURRENCY"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n > 0 {
+			return n
+		}
+	}
+	return defaultMultipartConcurrency
+}
+
+// probeRangeSupport sends a minimal GET request with "Range: bytes=0-0" to determine
+// whether the server (after following redirects) supports HTTP byte-range requests.
+// It returns the total content size when range support is confirmed, or 0 otherwise.
+func probeRangeSupport(client *http.Client, url string) (int64, error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Range", "bytes=0-0")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+
+	if resp.StatusCode != http.StatusPartialContent {
+		return 0, nil
+	}
+
+	// Content-Range: bytes 0-0/<total>
+	cr := resp.Header.Get("Content-Range")
+	if cr == "" {
+		return 0, nil
+	}
+	var start, end, total int64
+	if _, err := fmt.Sscanf(cr, "bytes %d-%d/%d", &start, &end, &total); err != nil || total <= 0 {
+		return 0, nil
+	}
+	return total, nil
+}
+
+// downloadChunkOnce downloads the byte range [start, end] from url and writes it to f at
+// offset start, accumulating the byte count into downloaded.
+func downloadChunkOnce(client *http.Client, url string, start, end int64, f *os.File, downloaded *atomic.Int64) error {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusPartialContent {
+		return fmt.Errorf("unexpected status %d for byte-range request", resp.StatusCode)
+	}
+
+	expected := end - start + 1
+	buf := make([]byte, 32*1024)
+	var written int64
+	offset := start
+
+	for {
+		n, err := resp.Body.Read(buf)
+		if n > 0 {
+			if _, werr := f.WriteAt(buf[:n], offset); werr != nil {
+				return werr
+			}
+			offset += int64(n)
+			written += int64(n)
+			downloaded.Add(int64(n))
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+	}
+
+	if written != expected {
+		return fmt.Errorf("chunk %d-%d: expected %d bytes, received %d", start, end, expected, written)
+	}
+	return nil
+}
+
+// downloadChunk retries downloadChunkOnce up to multipartMaxRetry additional times on
+// transient error, using a linearly increasing backoff between attempts.
+func downloadChunk(client *http.Client, url string, start, end int64, f *os.File, downloaded *atomic.Int64) error {
+	var lastErr error
+	for attempt := 0; attempt <= multipartMaxRetry; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
+		}
+		if err := downloadChunkOnce(client, url, start, end, f, downloaded); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+	}
+	return lastErr
+}
+
+// downloadArtifactMultipart downloads the artifact at url in concurrent byte-range chunks,
+// writing each chunk at the correct offset in a pre-sized temporary file before extraction.
+// Progress is reported to the provided callback at progressInterval intervals.
+func downloadArtifactMultipart(httpClient *http.Client, url string, totalSize int64, concurrency int, destDir safepaths.Absolute, progress func(downloaded, total int64)) error {
+	tmpfile, err := os.CreateTemp("", "gh-artifact.*.zip")
+	if err != nil {
+		return fmt.Errorf("error initializing temporary file: %w", err)
+	}
+	defer func() {
+		_ = tmpfile.Close()
+		_ = os.Remove(tmpfile.Name())
+	}()
+
+	// Pre-size the file so concurrent WriteAt calls land in valid regions.
+	if err := tmpfile.Truncate(totalSize); err != nil {
+		return fmt.Errorf("error pre-sizing temporary file: %w", err)
+	}
+
+	// Compute chunk boundaries.
+	chunkSize := (totalSize + int64(concurrency) - 1) / int64(concurrency)
+	type chunkRange struct{ start, end int64 }
+	var chunks []chunkRange
+	for start := int64(0); start < totalSize; start += chunkSize {
+		end := start + chunkSize - 1
+		if end >= totalSize {
+			end = totalSize - 1
+		}
+		chunks = append(chunks, chunkRange{start, end})
+	}
+
+	var totalDownloaded atomic.Int64
+
+	// Drive progress reporting from a ticker so the callback is invoked at most every
+	// progressInterval regardless of how many goroutines are writing concurrently.
+	if progress != nil {
+		ticker := time.NewTicker(progressInterval)
+		done := make(chan struct{})
+		go func() {
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					progress(totalDownloaded.Load(), totalSize)
+				case <-done:
+					return
+				}
+			}
+		}()
+		defer func() {
+			close(done)
+			progress(totalDownloaded.Load(), totalSize)
+		}()
+	}
+
+	// Download chunks concurrently, bounded by concurrency.
+	sem := make(chan struct{}, concurrency)
+	var wg sync.WaitGroup
+	errs := make([]error, len(chunks))
+
+	for i, ch := range chunks {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, start, end int64) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			errs[i] = downloadChunk(httpClient, url, start, end, tmpfile, &totalDownloaded)
+		}(i, ch.start, ch.end)
+	}
+	wg.Wait()
+
+	for _, err := range errs {
+		if err != nil {
+			return err
+		}
+	}
+
+	zipfile, err := zip.NewReader(tmpfile, totalSize)
+	if err != nil {
+		return fmt.Errorf("error extracting zip archive: %w", err)
+	}
+	if err := ghzip.ExtractZip(zipfile, destDir); err != nil {
+		return fmt.Errorf("error extracting zip archive: %w", err)
+	}
+	return nil
+}
+
+// downloadArtifactSingleStream fetches the artifact at url via a single HTTP stream and
+// extracts the resulting zip into destDir. This is the fallback path when byte-range
+// downloads are unavailable or fail.
+func downloadArtifactSingleStream(httpClient *http.Client, url string, destDir safepaths.Absolute, progress func(downloaded, total int64)) error {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return err
@@ -102,4 +317,20 @@ func downloadArtifact(httpClient *http.Client, url string, destDir safepaths.Abs
 	}
 
 	return nil
+}
+
+// downloadArtifact downloads and extracts the artifact at url into destDir.
+// It first probes the endpoint for HTTP byte-range support; when confirmed and the artifact
+// is large enough, it downloads concurrently via downloadArtifactMultipart.
+// Any failure in the multipart path causes a transparent fall-through to the single-stream path.
+func downloadArtifact(httpClient *http.Client, url string, destDir safepaths.Absolute, progress func(downloaded, total int64)) error {
+	concurrency := multipartConcurrency()
+
+	if totalSize, err := probeRangeSupport(httpClient, url); err == nil && totalSize >= multipartMinSize {
+		if err := downloadArtifactMultipart(httpClient, url, totalSize, concurrency, destDir, progress); err == nil {
+			return nil
+		}
+	}
+
+	return downloadArtifactSingleStream(httpClient, url, destDir, progress)
 }
