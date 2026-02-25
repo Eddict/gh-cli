@@ -264,52 +264,57 @@ func buildProgressFn(opts *DownloadOptions, artifactName string) func(downloaded
 	)
 
 	return func(downloaded, total int64) {
-		now := time.Now()
+		   now := time.Now()
 
-		// Update speed estimates at a slower cadence for stability, but always on completion.
-		done := total > 0 && downloaded >= total
-		if lastReport.IsZero() || now.Sub(lastReport) >= speedInterval || done {
-			// Average B/s
-			elapsed := now.Sub(start).Seconds()
-			avgBps := 0.0
-			if elapsed > 0 {
-				avgBps = float64(downloaded) / elapsed
-			}
+		   // Prevent spinner updates after completion
+		   if total > 0 && downloaded >= total {
+			   return
+		   }
 
-			// Current (windowed) B/s, smoothed via EMA
-			dt := now.Sub(lastReport).Seconds()
-			if lastReport.IsZero() {
-				dt = 0
-			}
-			if dt > 0 {
-				sample := float64(downloaded-lastN) / dt
-				if smoothedCurBps == 0 {
-					smoothedCurBps = sample
-				} else {
-					smoothedCurBps = alpha*sample + (1-alpha)*smoothedCurBps
-				}
-			}
+		   // Update speed estimates at a slower cadence for stability, but always on completion.
+		   done := total > 0 && downloaded >= total
+		   if lastReport.IsZero() || now.Sub(lastReport) >= speedInterval || done {
+			   // Average B/s
+			   elapsed := now.Sub(start).Seconds()
+			   avgBps := 0.0
+			   if elapsed > 0 {
+				   avgBps = float64(downloaded) / elapsed
+			   }
 
-			lastReport = now
-			lastN = downloaded
+			   // Current (windowed) B/s, smoothed via EMA
+			   dt := now.Sub(lastReport).Seconds()
+			   if lastReport.IsZero() {
+				   dt = 0
+			   }
+			   if dt > 0 {
+				   sample := float64(downloaded-lastN) / dt
+				   if smoothedCurBps == 0 {
+					   smoothedCurBps = sample
+				   } else {
+					   smoothedCurBps = alpha*sample + (1-alpha)*smoothedCurBps
+				   }
+			   }
 
-			// Build label
-			var label string
-			curStr := fmt.Sprintf("%s/s", formatBytes(int64(smoothedCurBps)))
-			avgStr := fmt.Sprintf("%s/s", formatBytes(int64(avgBps)))
+			   lastReport = now
+			   lastN = downloaded
 
-			if total > 0 {
-				pct10 := (downloaded * 1000) / total
-				if pct10 > 1000 {
-					pct10 = 1000
-				}
-				label = fmt.Sprintf("Downloading %s: %.1f%% (%s cur, %s avg)", artifactName, float64(pct10)/10.0, curStr, avgStr)
-			} else {
-				label = fmt.Sprintf("Downloading %s: %s (%s cur, %s avg)", artifactName, formatBytes(downloaded), curStr, avgStr)
-			}
+			   // Build label
+			   var label string
+			   curStr := fmt.Sprintf("%s/s", formatBytes(int64(smoothedCurBps)))
+			   avgStr := fmt.Sprintf("%s/s", formatBytes(int64(avgBps)))
 
-			opts.IO.StartProgressIndicatorWithLabel(label)
-		}
+			   if total > 0 {
+				   pct10 := (downloaded * 1000) / total
+				   if pct10 > 1000 {
+					   pct10 = 1000
+				   }
+				   label = fmt.Sprintf("Downloading %s: %.1f%% (%s cur, %s avg)", artifactName, float64(pct10)/10.0, curStr, avgStr)
+			   } else {
+				   label = fmt.Sprintf("Downloading %s: %s (%s cur, %s avg)", artifactName, formatBytes(downloaded), curStr, avgStr)
+			   }
+
+			   opts.IO.StartProgressIndicatorWithLabel(label)
+		   }
 	}
 }
 
