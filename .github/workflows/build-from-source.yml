@@ -1,0 +1,43 @@
+name: Build gh (upload artifact)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build gh (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build gh
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          # Build the gh CLI. Adjust the package path if your repo layout differs.
+          go build -trimpath -ldflags "-s -w" -o dist/gh ./cmd/gh
+          ./dist/gh version || true
+
+      - name: Upload gh binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: gh-${{ matrix.os }}
+          if-no-files-found: error
+          path: dist/gh
+          retention-days: 7
