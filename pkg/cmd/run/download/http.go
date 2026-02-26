@@ -258,6 +258,26 @@ func downloadArtifactMultipart(httpClient *http.Client, url string, totalSize in
 	if err != nil {
 		return fmt.Errorf("error extracting zip archive: %w", err)
 	}
+	// Remove only files/dirs that will be overwritten by extraction
+		       for _, zf := range zipfile.File {
+			       fpath, err := destDir.Join(zf.Name)
+			       if err != nil {
+				       var pathTraversalError safepaths.PathTraversalError
+				       if errors.As(err, &pathTraversalError) {
+					       continue
+				       }
+				       return fmt.Errorf("error preparing extraction for %q: %w", zf.Name, err)
+			       }
+			       // Never remove the root extraction directory itself
+			       if fpath.String() == destDir.String() {
+				       continue
+			       }
+			       if info, statErr := os.Stat(fpath.String()); statErr == nil {
+				       if !info.IsDir() {
+					       _ = os.Remove(fpath.String())
+				       }
+			       }
+		       }
 	if err := ghzip.ExtractZip(zipfile, destDir); err != nil {
 		return fmt.Errorf("error extracting zip archive: %w", err)
 	}
@@ -314,10 +334,29 @@ func downloadArtifactSingleStream(httpClient *http.Client, url string, destDir s
 	if err != nil {
 		return fmt.Errorf("error extracting zip archive: %w", err)
 	}
+	// Remove only files/dirs that will be overwritten by extraction
+		       for _, zf := range zipfile.File {
+			       fpath, err := destDir.Join(zf.Name)
+			       if err != nil {
+				       var pathTraversalError safepaths.PathTraversalError
+				       if errors.As(err, &pathTraversalError) {
+					       continue
+				       }
+				       return fmt.Errorf("error preparing extraction for %q: %w", zf.Name, err)
+			       }
+			       // Never remove the root extraction directory itself
+			       if fpath.String() == destDir.String() {
+				       continue
+			       }
+			       if info, statErr := os.Stat(fpath.String()); statErr == nil {
+				       if !info.IsDir() {
+					       _ = os.Remove(fpath.String())
+				       }
+			       }
+		       }
 	if err := ghzip.ExtractZip(zipfile, destDir); err != nil {
 		return fmt.Errorf("error extracting zip archive: %w", err)
 	}
-
 	return nil
 }
 
