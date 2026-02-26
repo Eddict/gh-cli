@@ -3,6 +3,7 @@ package download
 import (
 	"archive/zip"
 	"fmt"
+	"errors"
 	"github.com/cli/cli/v2/api"
 	"github.com/cli/cli/v2/internal/ghrepo"
 	"github.com/cli/cli/v2/internal/safepaths"
