@@ -26,7 +26,7 @@ func setDebugEnabledFunc(f func() bool) {
 	if debugEnabledFunc() {
 		// Open log file for appending, create if not exists
 		var err error
-		debugLogFile, err = os.OpenFile("./gh_run_dl.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		debugLogFile, err = os.OpenFile("gh_run_dl.log", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 		if err != nil {
 			// If file can't be opened, fallback to stderr only
 			debugLogFile = nil
@@ -41,10 +41,14 @@ func setDebugEnabledFunc(f func() bool) {
 
 func debugLogf(format string, args ...interface{}) {
 	if debugEnabledFunc() {
-		msg := fmt.Sprintf("[gh run download debug] "+format+"\n", args...)
-		fmt.Fprint(os.Stderr, msg)
+		now := time.Now().Format("2006-01-02 15:04:05.000")
+		msg := fmt.Sprintf(format, args...)
+		logLine := fmt.Sprintf("[%s] %s", now, msg)
+		// Always log to stderr
+		fmt.Fprintf(os.Stderr, "[gh run download debug] %s\n", logLine)
 		if debugLogFile != nil {
-			debugLogFile.WriteString(msg)
+			// Also log to file
+			fmt.Fprintf(debugLogFile, "%s\n", logLine)
 		}
 	}
 }
@@ -244,6 +248,22 @@ func runDownload(opts *DownloadOptions) error {
 					return fmt.Errorf("error downloading %s: would result in path traversal", a.Name)
 				}
 				return err
+			}
+		}
+
+		// Remove existing directory or file before extraction to allow overwrite
+		if info, statErr := os.Stat(destDir.String()); statErr == nil {
+			debugLogf("Removing existing destination before extraction: %s", destDir.String())
+			if info.IsDir() {
+				if rmErr := os.RemoveAll(destDir.String()); rmErr != nil {
+					debugLogf("Failed to remove existing directory: %s, error: %v", destDir.String(), rmErr)
+					return fmt.Errorf("failed to remove existing directory %s: %w", destDir.String(), rmErr)
+				}
+			} else {
+				if rmErr := os.Remove(destDir.String()); rmErr != nil {
+					debugLogf("Failed to remove existing file: %s, error: %v", destDir.String(), rmErr)
+					return fmt.Errorf("failed to remove existing file %s: %w", destDir.String(), rmErr)
+				}
 			}
 		}
 
