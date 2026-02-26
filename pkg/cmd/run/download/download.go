@@ -1,11 +1,40 @@
+
 package download
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"syscall"
+	"time"
+	"github.com/MakeNowJust/heredoc"
+	"github.com/cli/cli/v2/internal/safepaths"
+	"github.com/cli/cli/v2/pkg/cmd/run/shared"
+	"github.com/cli/cli/v2/pkg/cmdutil"
+	"github.com/cli/cli/v2/pkg/iostreams"
+	"github.com/cli/cli/v2/pkg/set"
+	"github.com/spf13/cobra"
+)
+
+// debugEnabled returns true if the debug flag is set in DownloadOptions.
+var debugEnabledFunc func() bool = func() bool { return false }
+
+func setDebugEnabledFunc(f func() bool) {
+	debugEnabledFunc = f
+}
+
+func debugLog(format string, args ...interface{}) {
+	if debugEnabledFunc() {
+		fmt.Fprintf(os.Stderr, "[gh run download debug] "+format+"\n", args...)
+	}
+}
 
 import (
 	"errors"
 	"fmt"
 	"path/filepath"
 	"time"
-
 	"github.com/MakeNowJust/heredoc"
 	"github.com/cli/cli/v2/internal/safepaths"
 	"github.com/cli/cli/v2/pkg/cmd/run/shared"
@@ -19,12 +48,13 @@ type DownloadOptions struct {
 	IO       *iostreams.IOStreams
 	Platform platform
 	Prompter iprompter
-
 	DoPrompt       bool
 	RunID          string
 	DestinationDir string
 	Names          []string
 	FilePatterns   []string
+	Debug          bool
+	Concurrency    int
 }
 
 type platform interface {
@@ -38,8 +68,9 @@ type iprompter interface {
 
 func NewCmdDownload(f *cmdutil.Factory, runF func(*DownloadOptions) error) *cobra.Command {
 	opts := &DownloadOptions{
-		IO:       f.IOStreams,
-		Prompter: f.Prompter,
+		IO:         f.IOStreams,
+		Prompter:   f.Prompter,
+		Concurrency: 4,
 	}
 
 	cmd := &cobra.Command{
@@ -78,6 +109,7 @@ func NewCmdDownload(f *cmdutil.Factory, runF func(*DownloadOptions) error) *cobr
 				opts.IO.CanPrompt() {
 				opts.DoPrompt = true
 			}
+		cmd.Flags().BoolVar(&opts.Debug, "debug", false, "Enable debug logging for download operations")
 			// support `-R, --repo` override
 			baseRepo, err := f.BaseRepo()
 			if err != nil {
@@ -90,29 +122,52 @@ func NewCmdDownload(f *cmdutil.Factory, runF func(*DownloadOptions) error) *cobr
 			opts.Platform = &apiPlatform{
 				client: httpClient,
 				repo:   baseRepo,
-			}
+		if debugEnabledFunc() {
 
 			if runF != nil {
 				return runF(opts)
 			}
 			return runDownload(opts)
+		setDebugEnabledFunc(func() bool { return opts.Debug })
 		},
 	}
 
 	cmd.Flags().StringVarP(&opts.DestinationDir, "dir", "D", ".", "The directory to download artifacts into")
 	cmd.Flags().StringArrayVarP(&opts.Names, "name", "n", nil, "Download artifacts that match any of the given names")
 	cmd.Flags().StringArrayVarP(&opts.FilePatterns, "pattern", "p", nil, "Download artifacts that match a glob pattern")
+	cmd.Flags().BoolVar(&opts.Debug, "debug", false, "Enable debug logging for download operations")
+	cmd.Flags().IntVar(&opts.Concurrency, "concurrency", 4, "Number of concurrent downloads for large artifacts")
 
 	return cmd
 }
 
 func runDownload(opts *DownloadOptions) error {
-	opts.IO.StartProgressIndicator()
-	artifacts, err := opts.Platform.List(opts.RunID)
-	opts.IO.StopProgressIndicator()
-	if err != nil {
-		return fmt.Errorf("error fetching artifacts: %w", err)
-	}
+		setDebugEnabledFunc(func() bool { return opts.Debug })
+	debugLog("runDownload: started")
+
+	   // Setup signal handling for cleanup
+	   sigCh := make(chan os.Signal, 1)
+	   doneCh := make(chan struct{})
+	   signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	   defer signal.Stop(sigCh)
+	   defer close(doneCh)
+
+	   go func() {
+		   select {
+		   case <-sigCh:
+			   opts.IO.StopProgressIndicator()
+			   os.Exit(1)
+		   case <-doneCh:
+			   return
+		   }
+	   }()
+
+	   opts.IO.StartProgressIndicator()
+	   artifacts, err := opts.Platform.List(opts.RunID)
+	   opts.IO.StopProgressIndicator()
+	   if err != nil {
+		   return fmt.Errorf("error fetching artifacts: %w", err)
+	   }
 
 	numValidArtifacts := 0
 	for _, a := range artifacts {
@@ -188,11 +243,18 @@ func runDownload(opts *DownloadOptions) error {
 			}
 		}
 
+		debugLog("Starting download for artifact: %s", a.Name)
 		progressFn := buildProgressFn(opts, a.Name)
-		err = opts.Platform.Download(a.DownloadURL, destDir, progressFn)
+		if p, ok := opts.Platform.(interface{ DownloadWithConcurrency(string, safepaths.Absolute, func(downloaded, total int64), int) error }); ok {
+			err = p.DownloadWithConcurrency(a.DownloadURL, destDir, progressFn, opts.Concurrency)
+		} else {
+			err = opts.Platform.Download(a.DownloadURL, destDir, progressFn)
+		}
 		if err != nil {
+			debugLog("Download error for %s: %v", a.Name, err)
 			return fmt.Errorf("error downloading %s: %w", a.Name, err)
 		}
+		debugLog("Download complete for artifact: %s", a.Name)
 		downloaded.Add(a.Name)
 	}
 
@@ -264,57 +326,59 @@ func buildProgressFn(opts *DownloadOptions, artifactName string) func(downloaded
 	)
 
 	return func(downloaded, total int64) {
-		   now := time.Now()
+		debugLog("progressFn: artifact=%s downloaded=%d total=%d", artifactName, downloaded, total)
+		now := time.Now()
 
-		   // Prevent spinner updates after completion
-		   if total > 0 && downloaded >= total {
-			   return
-		   }
+		// Prevent spinner updates after completion
+		if total > 0 && downloaded >= total {
+			debugLog("progressFn: artifact=%s completed", artifactName)
+			return
+		}
 
-		   // Update speed estimates at a slower cadence for stability, but always on completion.
-		   done := total > 0 && downloaded >= total
-		   if lastReport.IsZero() || now.Sub(lastReport) >= speedInterval || done {
-			   // Average B/s
-			   elapsed := now.Sub(start).Seconds()
-			   avgBps := 0.0
-			   if elapsed > 0 {
-				   avgBps = float64(downloaded) / elapsed
-			   }
+		// Update speed estimates at a slower cadence for stability, but always on completion.
+		done := total > 0 && downloaded >= total
+		if lastReport.IsZero() || now.Sub(lastReport) >= speedInterval || done {
+			// Average B/s
+			elapsed := now.Sub(start).Seconds()
+			avgBps := 0.0
+			if elapsed > 0 {
+				avgBps = float64(downloaded) / elapsed
+			}
 
-			   // Current (windowed) B/s, smoothed via EMA
-			   dt := now.Sub(lastReport).Seconds()
-			   if lastReport.IsZero() {
-				   dt = 0
-			   }
-			   if dt > 0 {
-				   sample := float64(downloaded-lastN) / dt
-				   if smoothedCurBps == 0 {
-					   smoothedCurBps = sample
-				   } else {
-					   smoothedCurBps = alpha*sample + (1-alpha)*smoothedCurBps
-				   }
-			   }
+			// Current (windowed) B/s, smoothed via EMA
+			dt := now.Sub(lastReport).Seconds()
+			if lastReport.IsZero() {
+				dt = 0
+			}
+			if dt > 0 {
+				sample := float64(downloaded-lastN) / dt
+				if smoothedCurBps == 0 {
+					smoothedCurBps = sample
+				} else {
+					smoothedCurBps = alpha*sample + (1-alpha)*smoothedCurBps
+				}
+			}
 
-			   lastReport = now
-			   lastN = downloaded
+			lastReport = now
+			lastN = downloaded
 
-			   // Build label
-			   var label string
-			   curStr := fmt.Sprintf("%s/s", formatBytes(int64(smoothedCurBps)))
-			   avgStr := fmt.Sprintf("%s/s", formatBytes(int64(avgBps)))
+			// Build label
+			var label string
+			curStr := fmt.Sprintf("%s/s", formatBytes(int64(smoothedCurBps)))
+			avgStr := fmt.Sprintf("%s/s", formatBytes(int64(avgBps)))
 
-			   if total > 0 {
-				   pct10 := (downloaded * 1000) / total
-				   if pct10 > 1000 {
-					   pct10 = 1000
-				   }
-				   label = fmt.Sprintf("Downloading %s: %.1f%% (%s cur, %s avg)", artifactName, float64(pct10)/10.0, curStr, avgStr)
-			   } else {
-				   label = fmt.Sprintf("Downloading %s: %s (%s cur, %s avg)", artifactName, formatBytes(downloaded), curStr, avgStr)
-			   }
+			if total > 0 {
+				pct10 := (downloaded * 1000) / total
+				if pct10 > 1000 {
+					pct10 = 1000
+				}
+				label = fmt.Sprintf("Downloading %s: %.1f%% (%s cur, %s avg)", artifactName, float64(pct10)/10.0, curStr, avgStr)
+			} else {
+				label = fmt.Sprintf("Downloading %s: %s (%s cur, %s avg)", artifactName, formatBytes(downloaded), curStr, avgStr)
+			}
 
-			   opts.IO.StartProgressIndicatorWithLabel(label)
-		   }
+			opts.IO.StartProgressIndicatorWithLabel(label)
+		}
 	}
 }
 

@@ -335,26 +335,29 @@ func Test_downloadArtifact_multipartFallback(t *testing.T) {
 	require.NotEmpty(t, entries)
 }
 
-func Test_multipartConcurrency(t *testing.T) {
-	t.Run("returns default when env var is unset", func(t *testing.T) {
-		t.Setenv("GH_MULTIPART_DOWNLOAD_CONCURRENCY", "")
-		assert.Equal(t, defaultMultipartConcurrency, multipartConcurrency())
-	})
+func Test_downloadArtifactMultipart_concurrency_arg(t *testing.T) {
+       zipBytes := readFixtureZip(t, "./fixtures/myproject.zip")
+       total := int64(len(zipBytes))
 
-	t.Run("returns value from env var", func(t *testing.T) {
-		t.Setenv("GH_MULTIPART_DOWNLOAD_CONCURRENCY", "8")
-		assert.Equal(t, 8, multipartConcurrency())
-	})
+       srv := rangeServer(zipBytes)
+       defer srv.Close()
 
-	t.Run("ignores invalid env var and returns default", func(t *testing.T) {
-		t.Setenv("GH_MULTIPART_DOWNLOAD_CONCURRENCY", "not-a-number")
-		assert.Equal(t, defaultMultipartConcurrency, multipartConcurrency())
-	})
+       tmpDir := t.TempDir()
+       destDir, err := safepaths.ParseAbsolute(filepath.Join(tmpDir, "out"))
+       require.NoError(t, err)
 
-	t.Run("ignores zero env var and returns default", func(t *testing.T) {
-		t.Setenv("GH_MULTIPART_DOWNLOAD_CONCURRENCY", "0")
-		assert.Equal(t, defaultMultipartConcurrency, multipartConcurrency())
-	})
+       for _, concurrency := range []int{1, 2, 4, 8} {
+	       t.Run(fmt.Sprintf("concurrency=%d", concurrency), func(t *testing.T) {
+		       var progressCalls int
+		       progressFn := func(downloaded, size int64) { progressCalls++ }
+		       err := downloadArtifactMultipart(srv.Client(), srv.URL+"/artifact.zip", total, concurrency, destDir, progressFn)
+		       require.NoError(t, err)
+		       entries, err := os.ReadDir(destDir.String())
+		       require.NoError(t, err)
+		       require.NotEmpty(t, entries)
+		       assert.GreaterOrEqual(t, progressCalls, 1)
+	       })
+       }
 }
 
 // readFixtureZip reads the raw bytes of a fixture zip file for use as a test body.
