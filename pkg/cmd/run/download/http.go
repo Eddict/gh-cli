@@ -17,6 +17,7 @@ import (
 	"time"
 )
 
+		"log"
 type apiPlatform struct {
 	client *http.Client
 	repo   ghrepo.Interface
@@ -140,7 +141,9 @@ func downloadChunkOnce(client *http.Client, url string, start, end int64, f *os.
 			}
 			offset += int64(n)
 			written += int64(n)
-			debugLogf("downloadChunkOnce: chunk %d-%d wrote %d bytes (total written: %d)", start, end, n, written)
+			if written%(10*1024*1024) < int64(n) {
+				debugLogf("downloadChunkOnce: chunk %d-%d wrote %d MB", start, end, written/(1024*1024))
+			}
 		}
 		if err == io.EOF {
 			debugLogf("downloadChunkOnce: completed chunk %d-%d, written=%d", start, end, written)
