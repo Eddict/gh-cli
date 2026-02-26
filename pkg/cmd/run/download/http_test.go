@@ -338,28 +338,28 @@ func Test_downloadArtifact_multipartFallback(t *testing.T) {
 }
 
 func Test_downloadArtifactMultipart_concurrency_arg(t *testing.T) {
-       zipBytes := readFixtureZip(t, "./fixtures/myproject.zip")
-       total := int64(len(zipBytes))
+	zipBytes := readFixtureZip(t, "./fixtures/myproject.zip")
+	total := int64(len(zipBytes))
 
-       srv := rangeServer(zipBytes)
-       defer srv.Close()
+	srv := rangeServer(zipBytes)
+	defer srv.Close()
 
-       tmpDir := t.TempDir()
-       destDir, err := safepaths.ParseAbsolute(filepath.Join(tmpDir, "out"))
-       require.NoError(t, err)
+	tmpDir := t.TempDir()
+	destDir, err := safepaths.ParseAbsolute(filepath.Join(tmpDir, "out"))
+	require.NoError(t, err)
 
-       for _, concurrency := range []int{1, 2, 4, 8} {
-	       t.Run(fmt.Sprintf("concurrency=%d", concurrency), func(t *testing.T) {
-		       var progressCalls int
-		       progressFn := func(downloaded, size int64) { progressCalls++ }
-		       err := downloadArtifactMultipart(srv.Client(), srv.URL+"/artifact.zip", total, concurrency, destDir, progressFn)
-		       require.NoError(t, err)
-		       entries, err := os.ReadDir(destDir.String())
-		       require.NoError(t, err)
-		       require.NotEmpty(t, entries)
-		       assert.GreaterOrEqual(t, progressCalls, 1)
-	       })
-       }
+	for _, concurrency := range []int{1, 2, 4, 8} {
+		t.Run(fmt.Sprintf("concurrency=%d", concurrency), func(t *testing.T) {
+			var progressCalls int
+			progressFn := func(downloaded, size int64) { progressCalls++ }
+			err := downloadArtifactMultipart(srv.Client(), srv.URL+"/artifact.zip", total, concurrency, destDir, progressFn)
+			require.NoError(t, err)
+			entries, err := os.ReadDir(destDir.String())
+			require.NoError(t, err)
+			require.NotEmpty(t, entries)
+			assert.GreaterOrEqual(t, progressCalls, 1)
+		})
+	}
 }
 
 // readFixtureZip reads the raw bytes of a fixture zip file for use as a test body.
