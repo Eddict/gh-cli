@@ -109,17 +109,20 @@ func downloadChunkOnce(client *http.Client, url string, start, end int64, f *os.
 	debugLogf("downloadChunkOnce: start=%d end=%d", start, end)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
+		debugLogf("downloadChunkOnce: failed to create request for chunk %d-%d: %v", start, end, err)
 		return err
 	}
 	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
 
 	resp, err := client.Do(req)
 	if err != nil {
+		debugLogf("downloadChunkOnce: HTTP request failed for chunk %d-%d: %v", start, end, err)
 		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusPartialContent {
+		debugLogf("downloadChunkOnce: unexpected status %d for chunk %d-%d", resp.StatusCode, start, end)
 		return fmt.Errorf("unexpected status %d for byte-range request", resp.StatusCode)
 	}
 
@@ -132,10 +135,12 @@ func downloadChunkOnce(client *http.Client, url string, start, end int64, f *os.
 		n, err := resp.Body.Read(buf)
 		if n > 0 {
 			if _, werr := f.WriteAt(buf[:n], offset); werr != nil {
+				debugLogf("downloadChunkOnce: WriteAt error for chunk %d-%d: %v", start, end, werr)
 				return werr
 			}
 			offset += int64(n)
 			written += int64(n)
+			debugLogf("downloadChunkOnce: chunk %d-%d wrote %d bytes (total written: %d)", start, end, n, written)
 		}
 		if err == io.EOF {
 			debugLogf("downloadChunkOnce: completed chunk %d-%d, written=%d", start, end, written)
@@ -148,10 +153,12 @@ func downloadChunkOnce(client *http.Client, url string, start, end int64, f *os.
 	}
 
 	if written != expected {
+		debugLogf("downloadChunkOnce: chunk %d-%d expected %d bytes, received %d", start, end, expected, written)
 		return fmt.Errorf("chunk %d-%d: expected %d bytes, received %d", start, end, expected, written)
 	}
 	// Only add to the global downloaded counter after a successful chunk download
 	downloaded.Add(written)
+	debugLogf("downloadChunkOnce: chunk %d-%d successfully added %d bytes to downloaded", start, end, written)
 	return nil
 }
 
@@ -164,7 +171,8 @@ func downloadChunk(client *http.Client, url string, start, end int64, f *os.File
 		if attempt > 0 {
 			time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
 		}
-		if err := downloadChunkOnce(client, url, start, end, f, downloaded); err == nil {
+		err := downloadChunkOnce(client, url, start, end, f, downloaded)
+		if err == nil {
 			debugLogf("downloadChunk: success chunk=%d-%d on attempt=%d", start, end, attempt)
 			return nil
 		} else {
@@ -172,7 +180,7 @@ func downloadChunk(client *http.Client, url string, start, end int64, f *os.File
 			lastErr = err
 		}
 	}
-	debugLogf("downloadChunk: failed chunk=%d-%d after %d attempts", start, end, multipartMaxRetry+1)
+	debugLogf("downloadChunk: failed chunk=%d-%d after %d attempts, last error: %v", start, end, multipartMaxRetry+1, lastErr)
 	return lastErr
 }
 
