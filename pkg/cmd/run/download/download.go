@@ -44,10 +44,8 @@ func debugLogf(format string, args ...interface{}) {
 		now := time.Now().Format("2006-01-02 15:04:05.000")
 		msg := fmt.Sprintf(format, args...)
 		logLine := fmt.Sprintf("[%s] %s", now, msg)
-		// Always log to stderr
-		fmt.Fprintf(os.Stderr, "[gh run download debug] %s\n", logLine)
 		if debugLogFile != nil {
-			// Also log to file
+			// Log only to file
 			fmt.Fprintf(debugLogFile, "%s\n", logLine)
 		}
 	}
