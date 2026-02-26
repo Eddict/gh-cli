@@ -318,10 +318,6 @@ func matchAnyPattern(patterns []string, name string) bool {
 // - Download speeds are computed less frequently and smoothed for stability.
 // When the spinner is not active (e.g., non-TTY or spinner disabled), the callback is a no-op.
 func buildProgressFn(opts *DownloadOptions, artifactName string) func(downloaded, total int64) {
-	if opts.IO.GetSpinnerDisabled() {
-		return nil
-	}
-
 	start := time.Now()
 
 	var (
@@ -336,12 +332,18 @@ func buildProgressFn(opts *DownloadOptions, artifactName string) func(downloaded
 	)
 
 	return func(downloaded, total int64) {
+		// Always log progress to debug log file
 		debugLogf("progressFn: artifact=%s downloaded=%d total=%d", artifactName, downloaded, total)
 		now := time.Now()
 
 		// Prevent spinner updates after completion
 		if total > 0 && downloaded >= total {
 			debugLogf("progressFn: artifact=%s completed", artifactName)
+			return
+		}
+
+		// Only update spinner and percentage in console if spinner is enabled
+		if opts.IO.GetSpinnerDisabled() {
 			return
 		}
 
