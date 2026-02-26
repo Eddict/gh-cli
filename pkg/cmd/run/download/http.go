@@ -17,6 +17,14 @@ import (
 	"time"
 )
 
+const (
+	// multipartMinSize is the minimum artifact size (10 MB) required to engage the multipart download path.
+	multipartMinSize = 10 * 1024 * 1024
+
+	// multipartMaxRetry is the maximum number of additional attempts per chunk on transient error.
+	multipartMaxRetry = 3
+)
+
 type apiPlatform struct {
 	client *http.Client
 	repo   ghrepo.Interface
