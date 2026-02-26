@@ -333,8 +333,14 @@ func downloadArtifact(httpClient *http.Client, url string, destDir safepaths.Abs
 		if err := downloadArtifactMultipart(httpClient, url, totalSize, concurrency, destDir, progress); err == nil {
 			debugLogf("downloadArtifact: multipart download succeeded")
 			return nil
+		} else {
+			debugLogf("downloadArtifact: multipart download failed: %v", err)
+			// If the error is from extraction, log more details
+			if err != nil {
+				debugLogf("downloadArtifact: detailed multipart extraction failure: %T: %v", err, err)
+			}
+			debugLogf("downloadArtifact: multipart download failed, falling back to single stream")
 		}
-		debugLogf("downloadArtifact: multipart download failed, falling back to single stream")
 	}
 
 	debugLogf("downloadArtifact: using single stream fallback")
