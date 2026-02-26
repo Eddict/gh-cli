@@ -23,8 +23,7 @@ type apiPlatform struct {
 
 // List implements the platform interface for artifact listing.
 func (p *apiPlatform) List(runID string) ([]shared.Artifact, error) {
-   // This is a stub implementation. Replace with real logic if needed.
-   return nil, fmt.Errorf("List not implemented")
+	return shared.ListArtifacts(p.client, p.repo, runID)
 }
 
 // Deprecated: use DownloadWithConcurrency
