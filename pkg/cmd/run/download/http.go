@@ -3,17 +3,17 @@ package download
 import (
 	"archive/zip"
 	"fmt"
+	"github.com/cli/cli/v2/api"
+	"github.com/cli/cli/v2/internal/ghrepo"
+	"github.com/cli/cli/v2/internal/safepaths"
+	ghzip "github.com/cli/cli/v2/internal/zip"
+	"github.com/cli/cli/v2/pkg/cmd/run/shared"
 	"io"
 	"net/http"
 	"os"
 	"sync"
 	"sync/atomic"
 	"time"
-	"github.com/cli/cli/v2/api"
-	"github.com/cli/cli/v2/internal/ghrepo"
-	"github.com/cli/cli/v2/internal/safepaths"
-	ghzip "github.com/cli/cli/v2/internal/zip"
-	"github.com/cli/cli/v2/pkg/cmd/run/shared"
 )
 
 type apiPlatform struct {
@@ -105,7 +105,7 @@ func probeRangeSupport(client *http.Client, url string) (int64, error) {
 // downloadChunkOnce downloads the byte range [start, end] from url and writes it to f at
 // offset start, accumulating the byte count into downloaded.
 func downloadChunkOnce(client *http.Client, url string, start, end int64, f *os.File, downloaded *atomic.Int64) error {
-		debugLogf("downloadChunkOnce: start=%d end=%d", start, end)
+	debugLogf("downloadChunkOnce: start=%d end=%d", start, end)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return err
@@ -178,7 +178,7 @@ func downloadChunk(client *http.Client, url string, start, end int64, f *os.File
 // writing each chunk at the correct offset in a pre-sized temporary file before extraction.
 // Progress is reported to the provided callback at progressInterval intervals.
 func downloadArtifactMultipart(httpClient *http.Client, url string, totalSize int64, concurrency int, destDir safepaths.Absolute, progress func(downloaded, total int64)) error {
-		debugLogf("downloadArtifactMultipart: url=%s totalSize=%d concurrency=%d", url, totalSize, concurrency)
+	debugLogf("downloadArtifactMultipart: url=%s totalSize=%d concurrency=%d", url, totalSize, concurrency)
 	tmpfile, err := os.CreateTemp("", "gh-artifact.*.zip")
 	if err != nil {
 		return fmt.Errorf("error initializing temporary file: %w", err)
@@ -268,7 +268,7 @@ func downloadArtifactMultipart(httpClient *http.Client, url string, totalSize in
 // extracts the resulting zip into destDir. This is the fallback path when byte-range
 // downloads are unavailable or fail.
 func downloadArtifactSingleStream(httpClient *http.Client, url string, destDir safepaths.Absolute, progress func(downloaded, total int64)) error {
-		debugLogf("downloadArtifactSingleStream: url=%s", url)
+	debugLogf("downloadArtifactSingleStream: url=%s", url)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return err
@@ -328,15 +328,15 @@ func downloadArtifactSingleStream(httpClient *http.Client, url string, destDir s
 func downloadArtifact(httpClient *http.Client, url string, destDir safepaths.Absolute, progress func(downloaded, total int64), concurrency int) error {
 	debugLogf("downloadArtifact: url=%s", url)
 
-       if totalSize, err := probeRangeSupport(httpClient, url); err == nil && totalSize >= multipartMinSize {
-			   debugLogf("downloadArtifact: using multipart, totalSize=%d", totalSize)
-	       if err := downloadArtifactMultipart(httpClient, url, totalSize, concurrency, destDir, progress); err == nil {
-					   debugLogf("downloadArtifact: multipart download succeeded")
-		       return nil
-	       }
-			   debugLogf("downloadArtifact: multipart download failed, falling back to single stream")
-       }
+	if totalSize, err := probeRangeSupport(httpClient, url); err == nil && totalSize >= multipartMinSize {
+		debugLogf("downloadArtifact: using multipart, totalSize=%d", totalSize)
+		if err := downloadArtifactMultipart(httpClient, url, totalSize, concurrency, destDir, progress); err == nil {
+			debugLogf("downloadArtifact: multipart download succeeded")
+			return nil
+		}
+		debugLogf("downloadArtifact: multipart download failed, falling back to single stream")
+	}
 
 	debugLogf("downloadArtifact: using single stream fallback")
-       return downloadArtifactSingleStream(httpClient, url, destDir, progress)
+	return downloadArtifactSingleStream(httpClient, url, destDir, progress)
 }

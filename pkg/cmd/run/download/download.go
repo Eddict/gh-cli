@@ -1,14 +1,8 @@
-
 package download
 
 import (
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
-	"syscall"
-	"time"
-	"os/signal"
 	"github.com/MakeNowJust/heredoc"
 	"github.com/cli/cli/v2/internal/safepaths"
 	"github.com/cli/cli/v2/pkg/cmd/run/shared"
@@ -16,25 +10,30 @@ import (
 	"github.com/cli/cli/v2/pkg/iostreams"
 	"github.com/cli/cli/v2/pkg/set"
 	"github.com/spf13/cobra"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"syscall"
+	"time"
 )
 
 // debugEnabled returns true if the debug flag is set in DownloadOptions.
 var debugEnabledFunc func() bool = func() bool { return false }
 
 func setDebugEnabledFunc(f func() bool) {
-    debugEnabledFunc = f
+	debugEnabledFunc = f
 }
 
 func debugLogf(format string, args ...interface{}) {
-    if debugEnabledFunc() {
-        fmt.Fprintf(os.Stderr, "[gh run download debug] "+format+"\n", args...)
-    }
+	if debugEnabledFunc() {
+		fmt.Fprintf(os.Stderr, "[gh run download debug] "+format+"\n", args...)
+	}
 }
 
 type DownloadOptions struct {
-	IO       *iostreams.IOStreams
-	Platform platform
-	Prompter iprompter
+	IO             *iostreams.IOStreams
+	Platform       platform
+	Prompter       iprompter
 	DoPrompt       bool
 	RunID          string
 	DestinationDir string
@@ -55,8 +54,8 @@ type iprompter interface {
 
 func NewCmdDownload(f *cmdutil.Factory, runF func(*DownloadOptions) error) *cobra.Command {
 	opts := &DownloadOptions{
-		IO:         f.IOStreams,
-		Prompter:   f.Prompter,
+		IO:          f.IOStreams,
+		Prompter:    f.Prompter,
 		Concurrency: 4,
 	}
 
@@ -88,34 +87,34 @@ func NewCmdDownload(f *cmdutil.Factory, runF func(*DownloadOptions) error) *cobr
 			# Select artifacts to download interactively
 			$ gh run download
 		`),
-		   RunE: func(cmd *cobra.Command, args []string) error {
-			   if len(args) > 0 {
-				   opts.RunID = args[0]
-			   } else if len(opts.Names) == 0 &&
-				   len(opts.FilePatterns) == 0 &&
-				   opts.IO.CanPrompt() {
-				   opts.DoPrompt = true
-			   }
-			   // support `-R, --repo` override
-			   baseRepo, err := f.BaseRepo()
-			   if err != nil {
-				   return err
-			   }
-			   httpClient, err := f.HttpClient()
-			   if err != nil {
-				   return err
-			   }
-			   opts.Platform = &apiPlatform{
-				   client: httpClient,
-				   repo:   baseRepo,
-			   }
-			   setDebugEnabledFunc(func() bool { return opts.Debug })
-			   if runF != nil {
-				   return runF(opts)
-			   }
-			   return runDownload(opts)
-		   },
-	   }
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				opts.RunID = args[0]
+			} else if len(opts.Names) == 0 &&
+				len(opts.FilePatterns) == 0 &&
+				opts.IO.CanPrompt() {
+				opts.DoPrompt = true
+			}
+			// support `-R, --repo` override
+			baseRepo, err := f.BaseRepo()
+			if err != nil {
+				return err
+			}
+			httpClient, err := f.HttpClient()
+			if err != nil {
+				return err
+			}
+			opts.Platform = &apiPlatform{
+				client: httpClient,
+				repo:   baseRepo,
+			}
+			setDebugEnabledFunc(func() bool { return opts.Debug })
+			if runF != nil {
+				return runF(opts)
+			}
+			return runDownload(opts)
+		},
+	}
 
 	cmd.Flags().StringVarP(&opts.DestinationDir, "dir", "D", ".", "The directory to download artifacts into")
 	cmd.Flags().StringArrayVarP(&opts.Names, "name", "n", nil, "Download artifacts that match any of the given names")
@@ -127,32 +126,32 @@ func NewCmdDownload(f *cmdutil.Factory, runF func(*DownloadOptions) error) *cobr
 }
 
 func runDownload(opts *DownloadOptions) error {
-		setDebugEnabledFunc(func() bool { return opts.Debug })
+	setDebugEnabledFunc(func() bool { return opts.Debug })
 	debugLogf("runDownload: started")
 
-	   // Setup signal handling for cleanup
-	   sigCh := make(chan os.Signal, 1)
-	   doneCh := make(chan struct{})
-	   signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-	   defer signal.Stop(sigCh)
-	   defer close(doneCh)
+	// Setup signal handling for cleanup
+	sigCh := make(chan os.Signal, 1)
+	doneCh := make(chan struct{})
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+	defer close(doneCh)
 
-	   go func() {
-		   select {
-		   case <-sigCh:
-			   opts.IO.StopProgressIndicator()
-			   os.Exit(1)
-		   case <-doneCh:
-			   return
-		   }
-	   }()
+	go func() {
+		select {
+		case <-sigCh:
+			opts.IO.StopProgressIndicator()
+			os.Exit(1)
+		case <-doneCh:
+			return
+		}
+	}()
 
-	   opts.IO.StartProgressIndicator()
-	   artifacts, err := opts.Platform.List(opts.RunID)
-	   opts.IO.StopProgressIndicator()
-	   if err != nil {
-		   return fmt.Errorf("error fetching artifacts: %w", err)
-	   }
+	opts.IO.StartProgressIndicator()
+	artifacts, err := opts.Platform.List(opts.RunID)
+	opts.IO.StopProgressIndicator()
+	if err != nil {
+		return fmt.Errorf("error fetching artifacts: %w", err)
+	}
 
 	numValidArtifacts := 0
 	for _, a := range artifacts {
@@ -228,18 +227,20 @@ func runDownload(opts *DownloadOptions) error {
 			}
 		}
 
-			   debugLogf("Starting download for artifact: %s", a.Name)
+		debugLogf("Starting download for artifact: %s", a.Name)
 		progressFn := buildProgressFn(opts, a.Name)
-		if p, ok := opts.Platform.(interface{ DownloadWithConcurrency(string, safepaths.Absolute, func(downloaded, total int64), int) error }); ok {
+		if p, ok := opts.Platform.(interface {
+			DownloadWithConcurrency(string, safepaths.Absolute, func(downloaded, total int64), int) error
+		}); ok {
 			err = p.DownloadWithConcurrency(a.DownloadURL, destDir, progressFn, opts.Concurrency)
 		} else {
 			err = opts.Platform.Download(a.DownloadURL, destDir, progressFn)
 		}
 		if err != nil {
-					   debugLogf("Download error for %s: %v", a.Name, err)
+			debugLogf("Download error for %s: %v", a.Name, err)
 			return fmt.Errorf("error downloading %s: %w", a.Name, err)
 		}
-			   debugLogf("Download complete for artifact: %s", a.Name)
+		debugLogf("Download complete for artifact: %s", a.Name)
 		downloaded.Add(a.Name)
 	}
 
@@ -316,7 +317,7 @@ func buildProgressFn(opts *DownloadOptions, artifactName string) func(downloaded
 
 		// Prevent spinner updates after completion
 		if total > 0 && downloaded >= total {
-					   debugLogf("progressFn: artifact=%s completed", artifactName)
+			debugLogf("progressFn: artifact=%s completed", artifactName)
 			return
 		}
 
