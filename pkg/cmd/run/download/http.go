@@ -105,7 +105,7 @@ func probeRangeSupport(client *http.Client, url string) (int64, error) {
 // downloadChunkOnce downloads the byte range [start, end] from url and writes it to f at
 // offset start, accumulating the byte count into downloaded.
 func downloadChunkOnce(client *http.Client, url string, start, end int64, f *os.File, downloaded *atomic.Int64) error {
-		debugLog("downloadChunkOnce: start=%d end=%d", start, end)
+		debugLogf("downloadChunkOnce: start=%d end=%d", start, end)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return err
@@ -138,11 +138,11 @@ func downloadChunkOnce(client *http.Client, url string, start, end int64, f *os.
 			downloaded.Add(int64(n))
 		}
 		if err == io.EOF {
-			debugLog("downloadChunkOnce: completed chunk %d-%d, written=%d", start, end, written)
+			debugLogf("downloadChunkOnce: completed chunk %d-%d, written=%d", start, end, written)
 			break
 		}
 		if err != nil {
-			debugLog("downloadChunkOnce: error in chunk %d-%d: %v", start, end, err)
+			debugLogf("downloadChunkOnce: error in chunk %d-%d: %v", start, end, err)
 			return err
 		}
 	}
@@ -158,19 +158,19 @@ func downloadChunkOnce(client *http.Client, url string, start, end int64, f *os.
 func downloadChunk(client *http.Client, url string, start, end int64, f *os.File, downloaded *atomic.Int64) error {
 	var lastErr error
 	for attempt := 0; attempt <= multipartMaxRetry; attempt++ {
-		debugLog("downloadChunk: attempt=%d chunk=%d-%d", attempt, start, end)
+		debugLogf("downloadChunk: attempt=%d chunk=%d-%d", attempt, start, end)
 		if attempt > 0 {
 			time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
 		}
 		if err := downloadChunkOnce(client, url, start, end, f, downloaded); err == nil {
-			debugLog("downloadChunk: success chunk=%d-%d on attempt=%d", start, end, attempt)
+			debugLogf("downloadChunk: success chunk=%d-%d on attempt=%d", start, end, attempt)
 			return nil
 		} else {
-			debugLog("downloadChunk: error chunk=%d-%d on attempt=%d: %v", start, end, attempt, err)
+			debugLogf("downloadChunk: error chunk=%d-%d on attempt=%d: %v", start, end, attempt, err)
 			lastErr = err
 		}
 	}
-	debugLog("downloadChunk: failed chunk=%d-%d after %d attempts", start, end, multipartMaxRetry+1)
+	debugLogf("downloadChunk: failed chunk=%d-%d after %d attempts", start, end, multipartMaxRetry+1)
 	return lastErr
 }
 
@@ -178,7 +178,7 @@ func downloadChunk(client *http.Client, url string, start, end int64, f *os.File
 // writing each chunk at the correct offset in a pre-sized temporary file before extraction.
 // Progress is reported to the provided callback at progressInterval intervals.
 func downloadArtifactMultipart(httpClient *http.Client, url string, totalSize int64, concurrency int, destDir safepaths.Absolute, progress func(downloaded, total int64)) error {
-		debugLog("downloadArtifactMultipart: url=%s totalSize=%d concurrency=%d", url, totalSize, concurrency)
+		debugLogf("downloadArtifactMultipart: url=%s totalSize=%d concurrency=%d", url, totalSize, concurrency)
 	tmpfile, err := os.CreateTemp("", "gh-artifact.*.zip")
 	if err != nil {
 		return fmt.Errorf("error initializing temporary file: %w", err)
@@ -237,7 +237,7 @@ func downloadArtifactMultipart(httpClient *http.Client, url string, totalSize in
 	for i, ch := range chunks {
 		wg.Add(1)
 		sem <- struct{}{}
-		debugLog("downloadArtifactMultipart: starting chunk %d-%d (index %d)", ch.start, ch.end, i)
+		debugLogf("downloadArtifactMultipart: starting chunk %d-%d (index %d)", ch.start, ch.end, i)
 		go func(i int, start, end int64) {
 			defer wg.Done()
 			defer func() { <-sem }()
@@ -248,11 +248,11 @@ func downloadArtifactMultipart(httpClient *http.Client, url string, totalSize in
 
 	for _, err := range errs {
 		if err != nil {
-			debugLog("downloadArtifactMultipart: error in chunk: %v", err)
+			debugLogf("downloadArtifactMultipart: error in chunk: %v", err)
 			return err
 		}
 	}
-	debugLog("downloadArtifactMultipart: all chunks complete, extracting zip")
+	debugLogf("downloadArtifactMultipart: all chunks complete, extracting zip")
 
 	zipfile, err := zip.NewReader(tmpfile, totalSize)
 	if err != nil {
@@ -268,7 +268,7 @@ func downloadArtifactMultipart(httpClient *http.Client, url string, totalSize in
 // extracts the resulting zip into destDir. This is the fallback path when byte-range
 // downloads are unavailable or fail.
 func downloadArtifactSingleStream(httpClient *http.Client, url string, destDir safepaths.Absolute, progress func(downloaded, total int64)) error {
-		debugLog("downloadArtifactSingleStream: url=%s", url)
+		debugLogf("downloadArtifactSingleStream: url=%s", url)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return err
@@ -326,17 +326,17 @@ func downloadArtifactSingleStream(httpClient *http.Client, url string, destDir s
 // is large enough, it downloads concurrently via downloadArtifactMultipart.
 // Any failure in the multipart path causes a transparent fall-through to the single-stream path.
 func downloadArtifact(httpClient *http.Client, url string, destDir safepaths.Absolute, progress func(downloaded, total int64), concurrency int) error {
-       debugLog("downloadArtifact: url=%s", url)
+	debugLogf("downloadArtifact: url=%s", url)
 
        if totalSize, err := probeRangeSupport(httpClient, url); err == nil && totalSize >= multipartMinSize {
-	       debugLog("downloadArtifact: using multipart, totalSize=%d", totalSize)
+			   debugLogf("downloadArtifact: using multipart, totalSize=%d", totalSize)
 	       if err := downloadArtifactMultipart(httpClient, url, totalSize, concurrency, destDir, progress); err == nil {
-		       debugLog("downloadArtifact: multipart download succeeded")
+					   debugLogf("downloadArtifact: multipart download succeeded")
 		       return nil
 	       }
-	       debugLog("downloadArtifact: multipart download failed, falling back to single stream")
+			   debugLogf("downloadArtifact: multipart download failed, falling back to single stream")
        }
 
-       debugLog("downloadArtifact: using single stream fallback")
+	debugLogf("downloadArtifact: using single stream fallback")
        return downloadArtifactSingleStream(httpClient, url, destDir, progress)
 }
