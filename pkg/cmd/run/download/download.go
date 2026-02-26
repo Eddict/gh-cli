@@ -19,15 +19,34 @@ import (
 
 // debugEnabled returns true if the debug flag is set in DownloadOptions.
 var debugEnabledFunc func() bool = func() bool { return false }
+var debugLogFile *os.File
 
 func setDebugEnabledFunc(f func() bool) {
-	debugEnabledFunc = f
+       debugEnabledFunc = f
+       if debugEnabledFunc() {
+	       // Open log file for appending, create if not exists
+	       var err error
+	       debugLogFile, err = os.OpenFile("./gh_run_dl.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	       if err != nil {
+		       // If file can't be opened, fallback to stderr only
+		       debugLogFile = nil
+	       }
+       } else {
+	       if debugLogFile != nil {
+		       debugLogFile.Close()
+		       debugLogFile = nil
+	       }
+       }
 }
 
 func debugLogf(format string, args ...interface{}) {
-	if debugEnabledFunc() {
-		fmt.Fprintf(os.Stderr, "[gh run download debug] "+format+"\n", args...)
-	}
+       if debugEnabledFunc() {
+	       msg := fmt.Sprintf("[gh run download debug] "+format+"\n", args...)
+	       fmt.Fprint(os.Stderr, msg)
+	       if debugLogFile != nil {
+		       debugLogFile.WriteString(msg)
+	       }
+       }
 }
 
 type DownloadOptions struct {
@@ -127,6 +146,7 @@ func NewCmdDownload(f *cmdutil.Factory, runF func(*DownloadOptions) error) *cobr
 
 func runDownload(opts *DownloadOptions) error {
 	setDebugEnabledFunc(func() bool { return opts.Debug })
+	defer setDebugEnabledFunc(func() bool { return false }) // Ensure log file is closed after run
 	debugLogf("runDownload: started")
 
 	// Setup signal handling for cleanup
