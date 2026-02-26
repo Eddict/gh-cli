@@ -2,8 +2,8 @@ package download
 
 import (
 	"archive/zip"
-	"fmt"
 	"errors"
+	"fmt"
 	"github.com/cli/cli/v2/api"
 	"github.com/cli/cli/v2/internal/ghrepo"
 	"github.com/cli/cli/v2/internal/safepaths"
@@ -136,7 +136,6 @@ func downloadChunkOnce(client *http.Client, url string, start, end int64, f *os.
 			}
 			offset += int64(n)
 			written += int64(n)
-			downloaded.Add(int64(n))
 		}
 		if err == io.EOF {
 			debugLogf("downloadChunkOnce: completed chunk %d-%d, written=%d", start, end, written)
@@ -151,6 +150,8 @@ func downloadChunkOnce(client *http.Client, url string, start, end int64, f *os.
 	if written != expected {
 		return fmt.Errorf("chunk %d-%d: expected %d bytes, received %d", start, end, expected, written)
 	}
+	// Only add to the global downloaded counter after a successful chunk download
+	downloaded.Add(written)
 	return nil
 }
 
@@ -260,25 +261,25 @@ func downloadArtifactMultipart(httpClient *http.Client, url string, totalSize in
 		return fmt.Errorf("error extracting zip archive: %w", err)
 	}
 	// Remove only files/dirs that will be overwritten by extraction
-		       for _, zf := range zipfile.File {
-			       fpath, err := destDir.Join(zf.Name)
-			       if err != nil {
-				       var pathTraversalError safepaths.PathTraversalError
-				       if errors.As(err, &pathTraversalError) {
-					       continue
-				       }
-				       return fmt.Errorf("error preparing extraction for %q: %w", zf.Name, err)
-			       }
-			       // Never remove the root extraction directory itself
-			       if fpath.String() == destDir.String() {
-				       continue
-			       }
-			       if info, statErr := os.Stat(fpath.String()); statErr == nil {
-				       if !info.IsDir() {
-					       _ = os.Remove(fpath.String())
-				       }
-			       }
-		       }
+	for _, zf := range zipfile.File {
+		fpath, err := destDir.Join(zf.Name)
+		if err != nil {
+			var pathTraversalError safepaths.PathTraversalError
+			if errors.As(err, &pathTraversalError) {
+				continue
+			}
+			return fmt.Errorf("error preparing extraction for %q: %w", zf.Name, err)
+		}
+		// Never remove the root extraction directory itself
+		if fpath.String() == destDir.String() {
+			continue
+		}
+		if info, statErr := os.Stat(fpath.String()); statErr == nil {
+			if !info.IsDir() {
+				_ = os.Remove(fpath.String())
+			}
+		}
+	}
 	if err := ghzip.ExtractZip(zipfile, destDir); err != nil {
 		return fmt.Errorf("error extracting zip archive: %w", err)
 	}
@@ -336,25 +337,25 @@ func downloadArtifactSingleStream(httpClient *http.Client, url string, destDir s
 		return fmt.Errorf("error extracting zip archive: %w", err)
 	}
 	// Remove only files/dirs that will be overwritten by extraction
-		       for _, zf := range zipfile.File {
-			       fpath, err := destDir.Join(zf.Name)
-			       if err != nil {
-				       var pathTraversalError safepaths.PathTraversalError
-				       if errors.As(err, &pathTraversalError) {
-					       continue
-				       }
-				       return fmt.Errorf("error preparing extraction for %q: %w", zf.Name, err)
-			       }
-			       // Never remove the root extraction directory itself
-			       if fpath.String() == destDir.String() {
-				       continue
-			       }
-			       if info, statErr := os.Stat(fpath.String()); statErr == nil {
-				       if !info.IsDir() {
-					       _ = os.Remove(fpath.String())
-				       }
-			       }
-		       }
+	for _, zf := range zipfile.File {
+		fpath, err := destDir.Join(zf.Name)
+		if err != nil {
+			var pathTraversalError safepaths.PathTraversalError
+			if errors.As(err, &pathTraversalError) {
+				continue
+			}
+			return fmt.Errorf("error preparing extraction for %q: %w", zf.Name, err)
+		}
+		// Never remove the root extraction directory itself
+		if fpath.String() == destDir.String() {
+			continue
+		}
+		if info, statErr := os.Stat(fpath.String()); statErr == nil {
+			if !info.IsDir() {
+				_ = os.Remove(fpath.String())
+			}
+		}
+	}
 	if err := ghzip.ExtractZip(zipfile, destDir); err != nil {
 		return fmt.Errorf("error extracting zip archive: %w", err)
 	}
