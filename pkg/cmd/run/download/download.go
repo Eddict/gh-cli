@@ -251,7 +251,6 @@ func runDownload(opts *DownloadOptions) error {
 			}
 		}
 
-
 		debugLogf("Starting download for artifact: %s", a.Name)
 		progressFn := buildProgressFn(opts, a.Name)
 		if p, ok := opts.Platform.(interface {
