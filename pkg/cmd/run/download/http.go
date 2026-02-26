@@ -17,10 +17,42 @@ import (
 	"time"
 )
 
-		"log"
 type apiPlatform struct {
 	client *http.Client
 	repo   ghrepo.Interface
+}
+
+// probeRangeSupport sends a minimal GET request with "Range: bytes=0-0" to determine
+// whether the server supports HTTP byte-range requests. It returns the total content size
+// when range support is confirmed, or 0 otherwise.
+func probeRangeSupport(client *http.Client, url string) (int64, error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Range", "bytes=0-0")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+
+	if resp.StatusCode != http.StatusPartialContent {
+		return 0, nil
+	}
+
+	// Content-Range: bytes 0-0/<total>
+	cr := resp.Header.Get("Content-Range")
+	if cr == "" {
+		return 0, nil
+	}
+	var start, end, total int64
+	if _, err := fmt.Sscanf(cr, "bytes %d-%d/%d", &start, &end, &total); err != nil || total <= 0 {
+		return 0, nil
+	}
+	return total, nil
 }
 
 // List implements the platform interface for artifact listing.
@@ -58,50 +90,6 @@ func (pr *progressReader) Read(p []byte) (int, error) {
 		pr.lastReport = now
 	}
 	return n, err
-}
-
-import (
-	"archive/zip"
-	"errors"
-	"fmt"
-	"github.com/cli/cli/v2/api"
-	"github.com/cli/cli/v2/internal/ghrepo"
-	"github.com/cli/cli/v2/internal/safepaths"
-	ghzip "github.com/cli/cli/v2/internal/zip"
-	"github.com/cli/cli/v2/pkg/cmd/run/shared"
-	"io"
-	"log"
-	"net/http"
-	"os"
-	"sync"
-	"sync/atomic"
-	"time"
-)
-		return 0, err
-	}
-	req.Header.Set("Range", "bytes=0-0")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, resp.Body)
-
-	if resp.StatusCode != http.StatusPartialContent {
-		return 0, nil
-	}
-
-	// Content-Range: bytes 0-0/<total>
-	cr := resp.Header.Get("Content-Range")
-	if cr == "" {
-		return 0, nil
-	}
-	var start, end, total int64
-	if _, err := fmt.Sscanf(cr, "bytes %d-%d/%d", &start, &end, &total); err != nil || total <= 0 {
-		return 0, nil
-	}
-	return total, nil
 }
 
 // downloadChunkOnce downloads the byte range [start, end] from url and writes it to f at
