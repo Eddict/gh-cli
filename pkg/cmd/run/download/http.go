@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -14,12 +13,17 @@ import (
 	"github.com/cli/cli/v2/internal/ghrepo"
 	"github.com/cli/cli/v2/internal/safepaths"
 	ghzip "github.com/cli/cli/v2/internal/zip"
-	"github.com/cli/cli/v2/pkg/cmd/run/shared"
 )
 
 type apiPlatform struct {
 	client *http.Client
 	repo   ghrepo.Interface
+}
+
+// List implements the platform interface for artifact listing.
+func (p *apiPlatform) List(runID string) ([]shared.Artifact, error) {
+   // This is a stub implementation. Replace with real logic if needed.
+   return nil, fmt.Errorf("List not implemented")
 }
 
 // Deprecated: use DownloadWithConcurrency

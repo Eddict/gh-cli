@@ -2,19 +2,20 @@
 package download
 
 import (
-    "errors"
-    "fmt"
-    "os"
-    "path/filepath"
-    "syscall"
-    "time"
-    "github.com/MakeNowJust/heredoc"
-    "github.com/cli/cli/v2/internal/safepaths"
-    "github.com/cli/cli/v2/pkg/cmd/run/shared"
-    "github.com/cli/cli/v2/pkg/cmdutil"
-    "github.com/cli/cli/v2/pkg/iostreams"
-    "github.com/cli/cli/v2/pkg/set"
-    "github.com/spf13/cobra"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"syscall"
+	"time"
+	"os/signal"
+	"github.com/MakeNowJust/heredoc"
+	"github.com/cli/cli/v2/internal/safepaths"
+	"github.com/cli/cli/v2/pkg/cmd/run/shared"
+	"github.com/cli/cli/v2/pkg/cmdutil"
+	"github.com/cli/cli/v2/pkg/iostreams"
+	"github.com/cli/cli/v2/pkg/set"
+	"github.com/spf13/cobra"
 )
 
 // debugEnabled returns true if the debug flag is set in DownloadOptions.
