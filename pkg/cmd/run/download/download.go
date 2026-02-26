@@ -22,31 +22,31 @@ var debugEnabledFunc func() bool = func() bool { return false }
 var debugLogFile *os.File
 
 func setDebugEnabledFunc(f func() bool) {
-       debugEnabledFunc = f
-       if debugEnabledFunc() {
-	       // Open log file for appending, create if not exists
-	       var err error
-	       debugLogFile, err = os.OpenFile("./gh_run_dl.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	       if err != nil {
-		       // If file can't be opened, fallback to stderr only
-		       debugLogFile = nil
-	       }
-       } else {
-	       if debugLogFile != nil {
-		       debugLogFile.Close()
-		       debugLogFile = nil
-	       }
-       }
+	debugEnabledFunc = f
+	if debugEnabledFunc() {
+		// Open log file for appending, create if not exists
+		var err error
+		debugLogFile, err = os.OpenFile("./gh_run_dl.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			// If file can't be opened, fallback to stderr only
+			debugLogFile = nil
+		}
+	} else {
+		if debugLogFile != nil {
+			debugLogFile.Close()
+			debugLogFile = nil
+		}
+	}
 }
 
 func debugLogf(format string, args ...interface{}) {
-       if debugEnabledFunc() {
-	       msg := fmt.Sprintf("[gh run download debug] "+format+"\n", args...)
-	       fmt.Fprint(os.Stderr, msg)
-	       if debugLogFile != nil {
-		       debugLogFile.WriteString(msg)
-	       }
-       }
+	if debugEnabledFunc() {
+		msg := fmt.Sprintf("[gh run download debug] "+format+"\n", args...)
+		fmt.Fprint(os.Stderr, msg)
+		if debugLogFile != nil {
+			debugLogFile.WriteString(msg)
+		}
+	}
 }
 
 type DownloadOptions struct {
