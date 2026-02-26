@@ -87,36 +87,34 @@ func NewCmdDownload(f *cmdutil.Factory, runF func(*DownloadOptions) error) *cobr
 			# Select artifacts to download interactively
 			$ gh run download
 		`),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) > 0 {
-				opts.RunID = args[0]
-			} else if len(opts.Names) == 0 &&
-				len(opts.FilePatterns) == 0 &&
-				opts.IO.CanPrompt() {
-				opts.DoPrompt = true
-			}
-		cmd.Flags().BoolVar(&opts.Debug, "debug", false, "Enable debug logging for download operations")
-			// support `-R, --repo` override
-			baseRepo, err := f.BaseRepo()
-			if err != nil {
-				return err
-			}
-			httpClient, err := f.HttpClient()
-			if err != nil {
-				return err
-			}
-			opts.Platform = &apiPlatform{
-				client: httpClient,
-				repo:   baseRepo,
-		if debugEnabledFunc() {
-
-			if runF != nil {
-				return runF(opts)
-			}
-			return runDownload(opts)
-		setDebugEnabledFunc(func() bool { return opts.Debug })
-		},
-	}
+		   RunE: func(cmd *cobra.Command, args []string) error {
+			   if len(args) > 0 {
+				   opts.RunID = args[0]
+			   } else if len(opts.Names) == 0 &&
+				   len(opts.FilePatterns) == 0 &&
+				   opts.IO.CanPrompt() {
+				   opts.DoPrompt = true
+			   }
+			   // support `-R, --repo` override
+			   baseRepo, err := f.BaseRepo()
+			   if err != nil {
+				   return err
+			   }
+			   httpClient, err := f.HttpClient()
+			   if err != nil {
+				   return err
+			   }
+			   opts.Platform = &apiPlatform{
+				   client: httpClient,
+				   repo:   baseRepo,
+			   }
+			   setDebugEnabledFunc(func() bool { return opts.Debug })
+			   if runF != nil {
+				   return runF(opts)
+			   }
+			   return runDownload(opts)
+		   },
+	   }
 
 	cmd.Flags().StringVarP(&opts.DestinationDir, "dir", "D", ".", "The directory to download artifacts into")
 	cmd.Flags().StringArrayVarP(&opts.Names, "name", "n", nil, "Download artifacts that match any of the given names")
