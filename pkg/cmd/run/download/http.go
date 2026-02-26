@@ -60,23 +60,23 @@ func (pr *progressReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-const (
-	// multipartMinSize is the minimum artifact size (10 MB) required to engage the multipart
-	// download path. Smaller artifacts are fetched with a single stream to avoid overhead.
-	multipartMinSize = 10 * 1024 * 1024
-
-	// multipartMaxRetry is the maximum number of additional attempts per chunk on transient error.
-	multipartMaxRetry = 3
+import (
+	"archive/zip"
+	"errors"
+	"fmt"
+	"github.com/cli/cli/v2/api"
+	"github.com/cli/cli/v2/internal/ghrepo"
+	"github.com/cli/cli/v2/internal/safepaths"
+	ghzip "github.com/cli/cli/v2/internal/zip"
+	"github.com/cli/cli/v2/pkg/cmd/run/shared"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"sync"
+	"sync/atomic"
+	"time"
 )
-
-// multipartConcurrency is now passed as an argument from the CLI.
-
-// probeRangeSupport sends a minimal GET request with "Range: bytes=0-0" to determine
-// whether the server (after following redirects) supports HTTP byte-range requests.
-// It returns the total content size when range support is confirmed, or 0 otherwise.
-func probeRangeSupport(client *http.Client, url string) (int64, error) {
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
 		return 0, err
 	}
 	req.Header.Set("Range", "bytes=0-0")
