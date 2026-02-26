@@ -137,6 +137,7 @@ func downloadChunkOnce(client *http.Client, url string, start, end int64, f *os.
 			}
 			offset += int64(n)
 			written += int64(n)
+			downloaded.Add(int64(n)) // Increment atomic counter for real-time progress
 			if written%(10*1024*1024) < int64(n) {
 				debugLogf("downloadChunkOnce: chunk %d-%d wrote %d MB", start, end, written/(1024*1024))
 			}
