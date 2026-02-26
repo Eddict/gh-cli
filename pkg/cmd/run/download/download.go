@@ -251,21 +251,6 @@ func runDownload(opts *DownloadOptions) error {
 			}
 		}
 
-		// Remove existing directory or file before extraction to allow overwrite
-		if info, statErr := os.Stat(destDir.String()); statErr == nil {
-			debugLogf("Removing existing destination before extraction: %s", destDir.String())
-			if info.IsDir() {
-				if rmErr := os.RemoveAll(destDir.String()); rmErr != nil {
-					debugLogf("Failed to remove existing directory: %s, error: %v", destDir.String(), rmErr)
-					return fmt.Errorf("failed to remove existing directory %s: %w", destDir.String(), rmErr)
-				}
-			} else {
-				if rmErr := os.Remove(destDir.String()); rmErr != nil {
-					debugLogf("Failed to remove existing file: %s, error: %v", destDir.String(), rmErr)
-					return fmt.Errorf("failed to remove existing file %s: %w", destDir.String(), rmErr)
-				}
-			}
-		}
 
 		debugLogf("Starting download for artifact: %s", a.Name)
 		progressFn := buildProgressFn(opts, a.Name)
