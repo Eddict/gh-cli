@@ -2,47 +2,33 @@
 package download
 
 import (
-	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
-	"syscall"
-	"time"
-	"github.com/MakeNowJust/heredoc"
-	"github.com/cli/cli/v2/internal/safepaths"
-	"github.com/cli/cli/v2/pkg/cmd/run/shared"
-	"github.com/cli/cli/v2/pkg/cmdutil"
-	"github.com/cli/cli/v2/pkg/iostreams"
-	"github.com/cli/cli/v2/pkg/set"
-	"github.com/spf13/cobra"
+    "errors"
+    "fmt"
+    "os"
+    "path/filepath"
+    "syscall"
+    "time"
+    "github.com/MakeNowJust/heredoc"
+    "github.com/cli/cli/v2/internal/safepaths"
+    "github.com/cli/cli/v2/pkg/cmd/run/shared"
+    "github.com/cli/cli/v2/pkg/cmdutil"
+    "github.com/cli/cli/v2/pkg/iostreams"
+    "github.com/cli/cli/v2/pkg/set"
+    "github.com/spf13/cobra"
 )
 
 // debugEnabled returns true if the debug flag is set in DownloadOptions.
 var debugEnabledFunc func() bool = func() bool { return false }
 
 func setDebugEnabledFunc(f func() bool) {
-	debugEnabledFunc = f
+    debugEnabledFunc = f
 }
 
 func debugLog(format string, args ...interface{}) {
-	if debugEnabledFunc() {
-		fmt.Fprintf(os.Stderr, "[gh run download debug] "+format+"\n", args...)
-	}
+    if debugEnabledFunc() {
+        fmt.Fprintf(os.Stderr, "[gh run download debug] "+format+"\n", args...)
+    }
 }
-
-import (
-	"errors"
-	"fmt"
-	"path/filepath"
-	"time"
-	"github.com/MakeNowJust/heredoc"
-	"github.com/cli/cli/v2/internal/safepaths"
-	"github.com/cli/cli/v2/pkg/cmd/run/shared"
-	"github.com/cli/cli/v2/pkg/cmdutil"
-	"github.com/cli/cli/v2/pkg/iostreams"
-	"github.com/cli/cli/v2/pkg/set"
-	"github.com/spf13/cobra"
-)
 
 type DownloadOptions struct {
 	IO       *iostreams.IOStreams

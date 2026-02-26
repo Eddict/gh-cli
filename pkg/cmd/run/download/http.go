@@ -1,3 +1,5 @@
+package download
+
 import (
 	"archive/zip"
 	"fmt"
