@@ -13,6 +13,7 @@ import (
 	"github.com/cli/cli/v2/internal/ghrepo"
 	"github.com/cli/cli/v2/internal/safepaths"
 	ghzip "github.com/cli/cli/v2/internal/zip"
+	"github.com/cli/cli/v2/pkg/cmd/run/shared"
 )
 
 type apiPlatform struct {
