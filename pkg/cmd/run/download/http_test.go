@@ -14,7 +14,6 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/cli/cli/v2/internal/ghrepo"
 	"github.com/cli/cli/v2/internal/safepaths"
 	"github.com/cli/cli/v2/pkg/httpmock"
 	"github.com/stretchr/testify/assert"
