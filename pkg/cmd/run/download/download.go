@@ -25,7 +25,7 @@ func setDebugEnabledFunc(f func() bool) {
     debugEnabledFunc = f
 }
 
-func debugLog(format string, args ...interface{}) {
+func debugLogf(format string, args ...interface{}) {
     if debugEnabledFunc() {
         fmt.Fprintf(os.Stderr, "[gh run download debug] "+format+"\n", args...)
     }
@@ -128,7 +128,7 @@ func NewCmdDownload(f *cmdutil.Factory, runF func(*DownloadOptions) error) *cobr
 
 func runDownload(opts *DownloadOptions) error {
 		setDebugEnabledFunc(func() bool { return opts.Debug })
-	debugLog("runDownload: started")
+	debugLogf("runDownload: started")
 
 	   // Setup signal handling for cleanup
 	   sigCh := make(chan os.Signal, 1)
@@ -228,7 +228,7 @@ func runDownload(opts *DownloadOptions) error {
 			}
 		}
 
-		debugLog("Starting download for artifact: %s", a.Name)
+			   debugLogf("Starting download for artifact: %s", a.Name)
 		progressFn := buildProgressFn(opts, a.Name)
 		if p, ok := opts.Platform.(interface{ DownloadWithConcurrency(string, safepaths.Absolute, func(downloaded, total int64), int) error }); ok {
 			err = p.DownloadWithConcurrency(a.DownloadURL, destDir, progressFn, opts.Concurrency)
@@ -236,10 +236,10 @@ func runDownload(opts *DownloadOptions) error {
 			err = opts.Platform.Download(a.DownloadURL, destDir, progressFn)
 		}
 		if err != nil {
-			debugLog("Download error for %s: %v", a.Name, err)
+					   debugLogf("Download error for %s: %v", a.Name, err)
 			return fmt.Errorf("error downloading %s: %w", a.Name, err)
 		}
-		debugLog("Download complete for artifact: %s", a.Name)
+			   debugLogf("Download complete for artifact: %s", a.Name)
 		downloaded.Add(a.Name)
 	}
 
@@ -311,12 +311,12 @@ func buildProgressFn(opts *DownloadOptions, artifactName string) func(downloaded
 	)
 
 	return func(downloaded, total int64) {
-		debugLog("progressFn: artifact=%s downloaded=%d total=%d", artifactName, downloaded, total)
+		debugLogf("progressFn: artifact=%s downloaded=%d total=%d", artifactName, downloaded, total)
 		now := time.Now()
 
 		// Prevent spinner updates after completion
 		if total > 0 && downloaded >= total {
-			debugLog("progressFn: artifact=%s completed", artifactName)
+					   debugLogf("progressFn: artifact=%s completed", artifactName)
 			return
 		}
 

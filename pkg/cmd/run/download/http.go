@@ -59,10 +59,6 @@ func (pr *progressReader) Read(p []byte) (int, error) {
 }
 
 const (
-	// defaultMultipartConcurrency is the number of concurrent chunk downloads used when the
-	// server supports HTTP byte-range requests and the artifact exceeds multipartMinSize.
-	defaultMultipartConcurrency = 4
-
 	// multipartMinSize is the minimum artifact size (10 MB) required to engage the multipart
 	// download path. Smaller artifacts are fetched with a single stream to avoid overhead.
 	multipartMinSize = 10 * 1024 * 1024
