@@ -388,7 +388,7 @@ func IssueGraphQL(fields []string) string {
 		case "headRepository":
 			q = append(q, `headRepository{id,name}`)
 		case "assignees":
-			q = append(q, `assignees(first:100){nodes{id,login,name},totalCount}`)
+			q = append(q, `assignees(first:100){nodes{id,login,name,databaseId},totalCount}`)
 		case "assignedActors":
 			q = append(q, assignedActors)
 		case "labels":

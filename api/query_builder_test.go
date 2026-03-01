@@ -21,7 +21,7 @@ func TestPullRequestGraphQL(t *testing.T) {
 		{
 			name:   "fields with nested structures",
 			fields: []string{"author", "assignees"},
-			want:   "author{login,...on User{id,name}},assignees(first:100){nodes{id,login,name},totalCount}",
+			want:   "author{login,...on User{id,name}},assignees(first:100){nodes{id,login,name,databaseId},totalCount}",
 		},
 		{
 			name:   "compressed query",
@@ -67,7 +67,7 @@ func TestIssueGraphQL(t *testing.T) {
 		{
 			name:   "fields with nested structures",
 			fields: []string{"author", "assignees"},
-			want:   "author{login,...on User{id,name}},assignees(first:100){nodes{id,login,name},totalCount}",
+			want:   "author{login,...on User{id,name}},assignees(first:100){nodes{id,login,name,databaseId},totalCount}",
 		},
 		{
 			name:   "compressed query",
