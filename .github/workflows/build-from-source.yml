@@ -76,13 +76,13 @@ jobs:
           TAG="${{ steps.compute_tag.outputs.upstream_version }}-${OWNER}.${{ github.event.inputs.fork_number }}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          # Create tag only if it doesn't exist locally
+          # Check local existence
           if git rev-parse "$TAG" >/dev/null 2>&1; then
             echo "Tag $TAG already exists locally, skipping creation."
           else
             git tag "$TAG"
           fi
-          # Push tag only if it doesn't exist remotely
+          # Check remote existence
           if git ls-remote --tags origin | grep -q "refs/tags/$TAG"; then
             echo "Tag $TAG already exists on remote, skipping push."
           else
