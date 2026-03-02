@@ -20,8 +20,7 @@ on:
         description: 'Platforms (linux,macos,windows)'
         required: false
         type: string
-        default: "linux,windows"
-        # default: "linux,macos,windows"
+        default: "linux,macos,windows"
       release:
         description: 'Create GitHub Release?'
         required: false
@@ -35,29 +34,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Find latest synced upstream tag
+      - name: Find latest synced upstream tag (fast)
         id: latest_upstream_tag
         run: |
           set -e
           git remote add upstream https://github.com/cli/cli.git || true
+          # Fetch all upstream tags in one go -- this is much faster!
           git fetch upstream --tags --quiet
-          latest=""
-          for tag in $(git ls-remote --tags upstream | awk '/refs\/tags\/v[0-9]+\.[0-9]+\.[0-9]+$/ {sub("refs/tags/", "", $2); print $2}' | sort -Vr); do
-            # Fetch only this tag locally so we can safely reference it
-            git fetch upstream "refs/tags/$tag:refs/tags/$tag" --quiet
-            upstream_commit=$(git rev-list -n 1 "$tag")
-            if git merge-base --is-ancestor $upstream_commit HEAD; then
-              latest=$tag
-              break
+          # Search all tags matching the vN.N.N format, sorted from newest to oldest
+          for tag in $(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' | sort -Vr); do
+            commit=$(git rev-list -n 1 "$tag")
+            if git merge-base --is-ancestor $commit HEAD; then
+              echo "Latest upstream tag you're synced with: $tag"
+              echo "upstream_tag=$tag" >> $GITHUB_OUTPUT
+              exit 0
             fi
           done
-          if [ -n "$latest" ]; then
-            echo "Latest upstream tag you're synced with: $latest"
-            echo "upstream_tag=$latest" >> $GITHUB_OUTPUT
-          else
-            echo "No matching upstream tag found"
-            echo "upstream_tag=" >> $GITHUB_OUTPUT
-          fi
+          echo "No matching upstream tag found"
+          echo "upstream_tag=" >> $GITHUB_OUTPUT
 
       - name: Compute upstream version for tag
         id: compute_tag
