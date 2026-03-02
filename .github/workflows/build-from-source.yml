@@ -1,59 +1,110 @@
-name: Build gh (upload artifact)
+name: Fork Tag & Trigger Deployment
 
 on:
   workflow_dispatch:
-
-permissions:
-  contents: read
+    inputs:
+      upstream_version:
+        description: 'Upstream version (e.g. v3.2.1). Leave blank to auto-detect.'
+        required: false
+        type: string
+      fork_number:
+        description: 'Fork iteration (e.g. 1)'
+        required: true
+        type: string
+      environment:
+        description: 'Deployment environment (default: production)'
+        required: false
+        type: environment
+        default: production
+      platforms:
+        description: 'Platforms (linux,macos,windows)'
+        required: false
+        type: string
+        default: "linux,macos,windows"
+      release:
+        description: 'Create GitHub Release?'
+        required: false
+        type: boolean
+        default: true
 
 jobs:
-  build:
-    name: Build gh (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-        # os: [ubuntu-latest, windows-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-
+  tag-and-trigger-deploy:
+    runs-on: ubuntu-latest
     steps:
-      - name: Check out code
-        uses: actions/checkout@v6
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Build gh
-        shell: bash
+      - name: Find latest synced upstream tag (fast)
+        if: ${{ !github.event.inputs.upstream_version }}
+        id: latest_upstream_tag
         run: |
-          set -euo pipefail
-          mkdir -p dist
-          # Build the gh CLI. Adjust the package path if your repo layout differs.
-          go build -trimpath -ldflags "-s -w" -o dist/gh ./cmd/gh
-          ./dist/gh version
+          set -e
+          git remote add upstream https://github.com/cli/cli.git || true
+          git fetch upstream --tags --quiet
+          for tag in $(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' | sort -Vr); do
+            commit=$(git rev-list -n 1 "$tag")
+            if git merge-base --is-ancestor $commit HEAD; then
+              echo "Latest upstream tag you're synced with: $tag"
+              echo "upstream_tag=$tag" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          done
+          echo "No matching upstream tag found"
+          echo "upstream_tag=" >> $GITHUB_OUTPUT
 
-      - name: Compute short SHA
-        id: vars
-        shell: bash
-        run: echo "short_sha=${GITHUB_SHA:0:12}" >> "$GITHUB_OUTPUT"
+      - name: Compute upstream version for tag
+        id: compute_tag
+        run: |
+          input_version="${{ github.event.inputs.upstream_version }}"
+          detected_version="${{ steps.latest_upstream_tag.outputs.upstream_tag }}"
+          final_version="$input_version"
+          if [ -z "$final_version" ]; then
+            final_version="$detected_version"
+          fi
+          if [ -z "$final_version" ]; then
+            echo "Error: Could not determine upstream version, and no input provided."
+            exit 1
+          fi
+          echo "Using upstream_version: $final_version"
+          echo "upstream_version=$final_version" >> $GITHUB_OUTPUT
 
-      # Alias artifact name (easy to download without knowing SHA)
-      - name: Upload gh binary (alias)
-        uses: actions/upload-artifact@v4
-        with:
-          name: gh-${{ matrix.os }}
-          if-no-files-found: error
-          path: dist/gh
-          retention-days: 7
+      - name: Create fork tag and push (idempotent)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          OWNER="$(echo "${{ github.repository }}" | cut -d'/' -f1)"
+          TAG="${{ steps.compute_tag.outputs.upstream_version }}-${OWNER}.${{ github.event.inputs.fork_number }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Create tag only if it doesn't exist locally
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists locally, skipping creation."
+          else
+            git tag "$TAG"
+          fi
+          # Push tag only if it doesn't exist remotely
+          if git ls-remote --tags origin | grep -q "refs/tags/$TAG"; then
+            echo "Tag $TAG already exists on remote, skipping push."
+          else
+            git push origin "$TAG"
+          fi
+          echo "Done processing tag: $TAG"
 
-      # Versioned artifact name (unique, traceable)
-      - name: Upload gh binary (versioned)
-        uses: actions/upload-artifact@v4
-        with:
-          name: gh-${{ matrix.os }}-${{ steps.vars.outputs.short_sha }}
-          if-no-files-found: error
-          path: dist/gh
-          retention-days: 7
+      - name: Trigger deployment workflow via workflow_dispatch API
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          SEMVER="${{ steps.compute_tag.outputs.upstream_version }}"
+          curl -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/deployment.yml/dispatches \
+            -d '{
+              "ref": "trunk",
+              "inputs": {
+                "tag_name": "'"$SEMVER"'",
+                "environment": "'"${{ github.event.inputs.environment }}"'",
+                "platforms": "'"${{ github.event.inputs.platforms }}"'",
+                "release": "'"${{ github.event.inputs.release }}"'"
+              }
+            }'
