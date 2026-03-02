@@ -83,7 +83,7 @@ jobs:
           echo "Created and pushed tag: $TAG"
 
       - name: Trigger deployment workflow
-        uses: peter-evans/workflow-dispatch@v1
+        uses: peter-evans/workflow-dispatch@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           repository: ${{ github.repository }}
