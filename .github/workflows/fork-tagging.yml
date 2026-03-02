@@ -36,6 +36,7 @@ jobs:
 
       - name: Find latest synced upstream tag (fast)
         id: latest_upstream_tag
+        if: ${{ !github.event.inputs.upstream_version }}
         run: |
           set -e
           git remote add upstream https://github.com/cli/cli.git || true
