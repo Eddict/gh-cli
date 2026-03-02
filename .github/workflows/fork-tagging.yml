@@ -73,9 +73,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          OWNER="$(echo "${{ github.repository }}" | cut -d'/' -f1)"
+          TAG="${{ steps.compute_tag.outputs.upstream_version }}-${OWNER}.${{ github.event.inputs.fork_number }}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          TAG="${{ steps.compute_tag.outputs.upstream_version }}-fork.${{ github.event.inputs.fork_number }}"
           git tag "$TAG"
           git push origin "$TAG"
           echo "Created and pushed tag: $TAG"
@@ -84,6 +85,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          OWNER="$(echo "${{ github.repository }}" | cut -d'/' -f1)"
+          TAG="${{ steps.compute_tag.outputs.upstream_version }}-${OWNER}.${{ github.event.inputs.fork_number }}"
           curl -X POST \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer $GH_TOKEN" \
@@ -91,7 +94,7 @@ jobs:
             -d '{
               "ref": "trunk",
               "inputs": {
-                "tag_name": "'"${{ steps.compute_tag.outputs.upstream_version }}-fork.${{ github.event.inputs.fork_number }}"'",
+                "tag_name": "'"$TAG"'",
                 "environment": "'"${{ github.event.inputs.environment }}"'",
                 "platforms": "'"${{ github.event.inputs.platforms }}"'",
                 "release": "'"${{ github.event.inputs.release }}"'"
