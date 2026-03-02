@@ -35,14 +35,12 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Find latest synced upstream tag (fast)
-        id: latest_upstream_tag
         if: ${{ !github.event.inputs.upstream_version }}
+        id: latest_upstream_tag
         run: |
           set -e
           git remote add upstream https://github.com/cli/cli.git || true
-          # Fetch all upstream tags in one go -- this is much faster!
           git fetch upstream --tags --quiet
-          # Search all tags matching the vN.N.N format, sorted from newest to oldest
           for tag in $(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' | sort -Vr); do
             commit=$(git rev-list -n 1 "$tag")
             if git merge-base --is-ancestor $commit HEAD; then
@@ -86,8 +84,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          OWNER="$(echo "${{ github.repository }}" | cut -d'/' -f1)"
-          TAG="${{ steps.compute_tag.outputs.upstream_version }}-${OWNER}.${{ github.event.inputs.fork_number }}"
+          SEMVER="${{ steps.compute_tag.outputs.upstream_version }}"
+          FORK_NUM="${{ github.event.inputs.fork_number }}"
+          DEPLOY_TAG="${SEMVER}.${FORK_NUM}"
           curl -X POST \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer $GH_TOKEN" \
@@ -95,7 +94,7 @@ jobs:
             -d '{
               "ref": "trunk",
               "inputs": {
-                "tag_name": "'"$TAG"'",
+                "tag_name": "'"$DEPLOY_TAG"'",
                 "environment": "'"${{ github.event.inputs.environment }}"'",
                 "platforms": "'"${{ github.event.inputs.platforms }}"'",
                 "release": "'"${{ github.event.inputs.release }}"'"
