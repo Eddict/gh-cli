@@ -3,7 +3,7 @@ on:
     inputs:
       upstream_version:
         description: 'Upstream version (e.g. v3.2.1). Leave blank to auto-detect.'
-        required: false  # <-- Not required!
+        required: false
         type: string
       fork_number:
         description: 'Fork iteration (e.g. 1)'
@@ -57,7 +57,6 @@ jobs:
       - name: Compute upstream version for tag
         id: compute_tag
         run: |
-          # Use input if provided, otherwise use detected latest tag
           input_version="${{ github.event.inputs.upstream_version }}"
           detected_version="${{ steps.latest_upstream_tag.outputs.upstream_tag }}"
           final_version="$input_version"
@@ -77,20 +76,25 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          TAG="${{ steps.compute_tag.outputs.upstream_version }}-fork.${{ inputs.fork_number }}"
+          TAG="${{ steps.compute_tag.outputs.upstream_version }}-fork.${{ github.event.inputs.fork_number }}"
           git tag "$TAG"
           git push origin "$TAG"
           echo "Created and pushed tag: $TAG"
 
-      - name: Trigger deployment workflow
-        uses: peter-evans/workflow-dispatch@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
-          workflow: deployment.yml
-          ref: main
-          inputs: |
-            tag_name=${{ steps.compute_tag.outputs.upstream_version }}-fork.${{ inputs.fork_number }}
-            environment=${{ inputs.environment }}
-            platforms=${{ inputs.platforms }}
-            release=${{ inputs.release }}
+      - name: Trigger deployment workflow via workflow_dispatch API
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/deployment.yml/dispatches \
+            -d '{
+              "ref": "trunk",
+              "inputs": {
+                "tag_name": "'"${{ steps.compute_tag.outputs.upstream_version }}-fork.${{ github.event.inputs.fork_number }}"'",
+                "environment": "'"${{ github.event.inputs.environment }}"'",
+                "platforms": "'"${{ github.event.inputs.platforms }}"'",
+                "release": "'"${{ github.event.inputs.release }}"'"
+              }
+            }'
