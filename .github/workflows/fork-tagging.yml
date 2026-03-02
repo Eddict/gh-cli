@@ -68,7 +68,7 @@ jobs:
           echo "Using upstream_version: $final_version"
           echo "upstream_version=$final_version" >> $GITHUB_OUTPUT
 
-      - name: Create fork tag and push
+      - name: Create fork tag and push (idempotent)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -76,17 +76,25 @@ jobs:
           TAG="${{ steps.compute_tag.outputs.upstream_version }}-${OWNER}.${{ github.event.inputs.fork_number }}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag "$TAG"
-          git push origin "$TAG"
-          echo "Created and pushed tag: $TAG"
+          # Check local existence
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists locally, skipping creation."
+          else
+            git tag "$TAG"
+          fi
+          # Check remote existence
+          if git ls-remote --tags origin | grep -q "refs/tags/$TAG"; then
+            echo "Tag $TAG already exists on remote, skipping push."
+          else
+            git push origin "$TAG"
+          fi
+          echo "Done processing tag: $TAG"
 
       - name: Trigger deployment workflow via workflow_dispatch API
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           SEMVER="${{ steps.compute_tag.outputs.upstream_version }}"
-          FORK_NUM="${{ github.event.inputs.fork_number }}"
-          DEPLOY_TAG="${SEMVER}.${FORK_NUM}"
           curl -X POST \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer $GH_TOKEN" \
@@ -94,7 +102,7 @@ jobs:
             -d '{
               "ref": "trunk",
               "inputs": {
-                "tag_name": "'"$DEPLOY_TAG"'",
+                "tag_name": "'"$SEMVER"'",
                 "environment": "'"${{ github.event.inputs.environment }}"'",
                 "platforms": "'"${{ github.event.inputs.platforms }}"'",
                 "release": "'"${{ github.event.inputs.release }}"'"
