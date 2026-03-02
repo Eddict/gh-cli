@@ -1,0 +1,96 @@
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_version:
+        description: 'Upstream version (e.g. v3.2.1). Leave blank to auto-detect.'
+        required: false  # <-- Not required!
+        type: string
+      fork_number:
+        description: 'Fork iteration (e.g. 1)'
+        required: true
+        type: string
+      environment:
+        description: 'Deployment environment (default: production)'
+        required: false
+        type: environment
+        default: production
+      platforms:
+        description: 'Platforms (linux,macos,windows)'
+        required: false
+        type: string
+        default: "linux,macos,windows"
+      release:
+        description: 'Create GitHub Release?'
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  tag-and-trigger-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Find latest synced upstream tag
+        id: latest_upstream_tag
+        run: |
+          set -e
+          git remote add upstream https://github.com/cli/cli.git || true
+          git fetch upstream --tags --quiet
+          latest=""
+          for tag in $(git ls-remote --tags upstream | awk '/refs\/tags\/v[0-9]+\.[0-9]+\.[0-9]+$/ {sub("refs/tags/", "", $2); print $2}' | sort -Vr); do
+            upstream_commit=$(git rev-list -n 1 upstream/$tag)
+            if git merge-base --is-ancestor $upstream_commit HEAD; then
+              latest=$tag
+              break
+            fi
+          done
+          if [ -n "$latest" ]; then
+            echo "Latest upstream tag you're synced with: $latest"
+            echo "upstream_tag=$latest" >> $GITHUB_OUTPUT
+          else
+            echo "No matching upstream tag found"
+            echo "upstream_tag=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Compute upstream version for tag
+        id: compute_tag
+        run: |
+          # Use input if provided, otherwise use detected latest tag
+          input_version="${{ github.event.inputs.upstream_version }}"
+          detected_version="${{ steps.latest_upstream_tag.outputs.upstream_tag }}"
+          final_version="$input_version"
+          if [ -z "$final_version" ]; then
+            final_version="$detected_version"
+          fi
+          if [ -z "$final_version" ]; then
+            echo "Error: Could not determine upstream version, and no input provided."
+            exit 1
+          fi
+          echo "Using upstream_version: $final_version"
+          echo "upstream_version=$final_version" >> $GITHUB_OUTPUT
+
+      - name: Create fork tag and push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          TAG="${{ steps.compute_tag.outputs.upstream_version }}-fork.${{ inputs.fork_number }}"
+          git tag "$TAG"
+          git push origin "$TAG"
+          echo "Created and pushed tag: $TAG"
+
+      - name: Trigger deployment workflow
+        uses: peter-evans/workflow-dispatch@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          workflow: deployment.yml
+          ref: main
+          inputs: |
+            tag_name=${{ steps.compute_tag.outputs.upstream_version }}-fork.${{ inputs.fork_number }}
+            environment=${{ inputs.environment }}
+            platforms=${{ inputs.platforms }}
+            release=${{ inputs.release }}
