@@ -1,3 +1,5 @@
+name: Fork Tag & Trigger Deployment
+
 on:
   workflow_dispatch:
     inputs:
@@ -18,7 +20,8 @@ on:
         description: 'Platforms (linux,macos,windows)'
         required: false
         type: string
-        default: "linux,macos,windows"
+        default: "linux,windows"
+        # default: "linux,macos,windows"
       release:
         description: 'Create GitHub Release?'
         required: false
@@ -40,7 +43,9 @@ jobs:
           git fetch upstream --tags --quiet
           latest=""
           for tag in $(git ls-remote --tags upstream | awk '/refs\/tags\/v[0-9]+\.[0-9]+\.[0-9]+$/ {sub("refs/tags/", "", $2); print $2}' | sort -Vr); do
-            upstream_commit=$(git rev-list -n 1 upstream/$tag)
+            # Fetch only this tag locally so we can safely reference it
+            git fetch upstream "refs/tags/$tag:refs/tags/$tag" --quiet
+            upstream_commit=$(git rev-list -n 1 "$tag")
             if git merge-base --is-ancestor $upstream_commit HEAD; then
               latest=$tag
               break
